@@ -76,11 +76,11 @@ lemma and_32_mle_one_chunk_[ZKField f] (bv1 bv2 : BitVec 32) (fv1 fv2 : Vector f
   =
   (foutput = evalSubtable AND_64 (Vector.append fv1 fv2))
 := by
+--- unfold Jolt Definitions
  unfold AND_64
  unfold evalSubtable
- simp (config := { failIfUnchanged := false })
  unfold subtableFromMLE
- simp (config := { failIfUnchanged := false })
  unfold Vector.append
- simp (config := { failIfUnchanged := false })
+ simp
+
  solveMLE 32

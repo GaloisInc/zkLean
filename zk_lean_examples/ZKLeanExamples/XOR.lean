@@ -1,6 +1,7 @@
 import ZKLeanExamples.DefFF
 
 
+
 set_option maxHeartbeats  20000000000000000000
 
 def XOR_32 [Field f] : Subtable f 64 :=
@@ -77,11 +78,12 @@ lemma xor_32_mle_one_chunk_liza[ZKField f] (bv1 bv2 : BitVec 32) (fv1 fv2 : Vect
   =
   (foutput = evalSubtable XOR_32 (Vector.append fv1 fv2))
 := by
+-- unfold Jolt Definitions
  unfold XOR_32
  unfold evalSubtable
- simp (config := { failIfUnchanged := false })
  unfold subtableFromMLE
- simp (config := { failIfUnchanged := false })
  unfold Vector.append
- simp (config := { failIfUnchanged := false })
+ simp
+
+
  solveMLE 32

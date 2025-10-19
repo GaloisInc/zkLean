@@ -99,3 +99,64 @@ lemma BitVec_ofNat_eq_iff (n : ℕ) {x y : ℕ} (hx : x < 2^n) (hy : y < 2^n) :
   rw [Nat.mod_eq_of_lt] at hxy
   apply hxy
   apply hx
+
+
+
+
+lemma square_eq_one_zero {n :ℕ} [p: Fact (Nat.Prime n)] {x : ZMod n} (w:ℕ) [ne: NeZero w]  : x * x = x <-> ( x.val <= 1)  /\ (( BitVec.ofNat w x.val = 0#w  ) \/ ( BitVec.ofNat w x.val = 1#w) ):= by
+  constructor
+  intro h
+  --rw [BVModEq.ZMod.eq_if_val] at h
+  --rw [ZMod.val_mul] at h
+  have h0 : x * (x - 1) = 0 := by
+        rw [mul_sub, mul_one, <- pow_two]
+        rw [<- pow_two] at h
+        rw [h]
+        simp
+  --haveI := (inferInstance : IsDomain (ZMod n))
+  rcases eq_zero_or_eq_zero_of_mul_eq_zero h0 with h | h
+  rw [h]
+  simp
+  rw [sub_eq_zero] at h
+  rw [h]
+  rw [ZMod.val_one]
+  simp
+  intro h
+  rw [ZMod.eq_if_val]
+  rw [ZMod.val_mul]
+  rcases h with ⟨h1, h2⟩
+  rw [Nat.mod_eq_of_lt]
+  rw [BitVec_ofNat_eq_iff w]
+  rw [BitVec.ofNat_mul]
+  rcases h2 with x1 | x2
+  rw [x1]
+  simp
+  rw [x2]
+  simp
+  apply Nat.lt_of_le_of_lt
+  apply Nat.mul_le_mul
+  apply h1
+  apply h1
+  simp
+  apply ne.out
+  apply Nat.lt_of_le_of_lt
+  apply h1
+  simp
+  apply ne.out
+  apply Nat.lt_of_le_of_lt
+  apply Nat.mul_le_mul
+  apply h1
+  apply h1
+  simp
+  apply p.out.two_le
+
+
+
+
+
+
+
+
+
+
+      -- since n is
