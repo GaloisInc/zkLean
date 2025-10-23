@@ -20,9 +20,9 @@ lemma mul_comm_num_left (n t : ℕ) :
   simpa using Nat.mul_comm (n : ℕ) t
 
 lemma BitVec.toNatLT {bw} {a : BitVec bw}:
-  a.toNat <= 2^bw := by
-  have h := a.toFin.isLt        -- h : ↑a.toFin < 2 ^ bw
-  exact Nat.le_of_lt h
+  a.toNat <= 2^bw -1 := by
+  have h : a.toNat < 2 ^ bw := a.toFin.isLt
+  exact Nat.le_pred_of_lt h
 
 def mkAddNat (es : List Expr) : Expr :=
   match es with
@@ -165,6 +165,7 @@ def handleIfMux (loopBodyReturn : LoopBodyLabel) (g : MVarId) (args : Array Expr
 def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
   (g : MVarId) (hyps : List Name) (terms : NameSet)
   : ContT LoopBodyResult TacticM Unit := do
+  logInfo m!"We are here {g}"
   let bounds ← monadLift $ g.withContext do
     let lctx ← getLCtx
     hyps.foldlM (init := []) fun acc hName => do
@@ -216,6 +217,7 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (hyps : List Na
 
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (stx : Syntax)
   : ContT LoopBodyResult TacticM Unit := do
+  logInfo m!"{stx}"
   try
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals }
@@ -340,3 +342,42 @@ elab_rules : tactic
     -- Note: we built the updated goals list in reverse to avoid repeatedly
     -- traversing an ever-growingly long prefix.
     setGoals (updatedGoalsReversed.reverse ++ goalQueue.dList ++ goalQueue.eList.reverse)
+
+
+abbrev ff := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+
+instance : Fact (Nat.Prime ff) := by sorry
+
+instance : Fact (NeZero ff) := by sorry
+
+
+
+
+-- example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> 1 - fv[0].val * fv[1].val < ff := by
+--   intros h1 h2
+--   try_apply_lemma_hyps [h1, h2]
+
+
+lemma aaa {a b : BitVec 2} : a.toNat <= (b.toNat + 4 ) := by
+  try_apply_lemma_hyps []
+  apply Nat.le_trans
+  apply BitVec.toNatLT
+
+
+  simp
+
+
+-- EXAMPLE 1 that needs to work
+
+fv : Vector (ZMod ff) 8
+h1 : fv[0].val ≤ 1
+h2 : fv[1].val ≤ 1
+h3 : fv[2].val ≤ 1
+⊢ fv[0].val * fv[1].val ≤ 1
+
+
+-- Example 2 that needs to work
+
+
+b a : BitVec 2
+⊢ a.toNat ≤ b.toNat + 3
