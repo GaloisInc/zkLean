@@ -368,16 +368,12 @@ lemma aaa {a b : BitVec 2} : a.toNat <= (b.toNat + 4 ) := by
 
 
 -- EXAMPLE 1 that needs to work
+example { fv : Vector (ZMod ff) 8} :
+( h1 : fv[0].val ≤ 1) -> (h2 : fv[1].val ≤ 1) -> ( h3 : fv[2].val ≤ 1) ->
+( fv[0].val * fv[1].val ≤ 1) := by
+try_apply_lemma_hyps []
 
-fv : Vector (ZMod ff) 8
-h1 : fv[0].val ≤ 1
-h2 : fv[1].val ≤ 1
-h3 : fv[2].val ≤ 1
-⊢ fv[0].val * fv[1].val ≤ 1
 
 
 -- Example 2 that needs to work
-
-
-b a : BitVec 2
-⊢ a.toNat ≤ b.toNat + 3
+-- example { b a : BitVec 2} : a.toNat ≤ b.toNat + 3
