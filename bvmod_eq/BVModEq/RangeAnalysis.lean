@@ -233,7 +233,27 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
   let mul ← monadLift (m := TacticM) ``(Nat.mul_le_mul)
   let rfl ← monadLift (m := TacticM) ``(Nat.le_refl)
   let bitvec ← monadLift (m := TacticM) ``(BitVec.toNatLT)
+  let expLeq ← monadLift (m := TacticM) ``(Nat.le_trans)
+  let constLeq ← monadLift (m := TacticM) ``(Nat.le_of_lt_add_one)
   let (fn, args) := mainGoalType.getAppFnArgs
+  let mut metPresent := false
+  match args[args.size-1]!.getAppFn with
+    | .mvar id =>
+        logInfo m! "metavariable: {id.name}"
+    | .const ``OfNat.ofNat _ =>
+      logInfo "numeric literal (via OfNat.ofNat)"
+    | .const name _ =>
+        logInfo m! "constant: {name}"
+    | .lit lit =>
+        logInfo m! "literal"
+    | .fvar id =>
+        logInfo m! "free variable: {id.name}"
+    | .bvar n =>
+       logInfo m! "bound variable #{n}"
+    | .app f x =>
+        logInfo m! "application:"
+    | _ =>
+        logInfo m! "other expression"
   let unfolded := ← monadLift $ withTransparency .reducible (whnf args[2]!)
   let fn3 := unfolded.getAppFn
   if (terms.size > 0) then
@@ -250,21 +270,25 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
     | _ => pure ()
   match fn with
   | ``LE.le =>
-    match fn3 with
-    | Expr.const name _ =>
-      match name with
-      | ``HSub.hSub => applyThisLemma sub
-      | ``HAdd.hAdd => applyThisLemma add
-      | ``HMul.hMul => applyThisLemma mul
-      | ``OfNat.ofNat => applyThisLemma rfl
-      -- rfl is a place holder should be something else
-      | ``ite => applyIfLemma loopBodyReturn
-      | ``ZMod.val => applyZModLemma loopBodyReturn g hyps
-      | ``BitVec.toNat => applyThisLemma bitvec
-      | _ =>
-         pure ()
-    | _ =>
-      if fn3.isFVar then applyZModLemma loopBodyReturn g hyps
+    match  args[args.size-1]!.getAppFn with
+      |  .mvar _ =>
+      match fn3 with
+        | Expr.const name _ =>
+          match name with
+          | ``HSub.hSub => applyThisLemma sub
+          | ``HAdd.hAdd => applyThisLemma add
+          | ``HMul.hMul => applyThisLemma mul
+          | ``OfNat.ofNat => applyThisLemma rfl
+          -- rfl is a place holder should be something else
+          | ``ite => applyIfLemma loopBodyReturn
+          | ``ZMod.val => applyZModLemma loopBodyReturn g hyps
+          | ``BitVec.toNat => applyThisLemma bitvec
+          | _ =>
+            pure ()
+        | _ =>
+          if fn3.isFVar then applyZModLemma loopBodyReturn g hyps
+      | .const ``OfNat.ofNat _ => applyThisLemma constLeq
+      | _ => applyThisLemma expLeq
   | _ => pure ()
 
 @[tactic tryApplyLemHyps]
@@ -288,6 +312,7 @@ elab_rules : tactic
     if did_mux then do
       didMux
       did_mux := false
+    evalTactic (← `(tactic| try simp))
     let goals ← getGoals
     let mut updatedGoalsReversed : List MVarId := [] -- to keep track of goals we changed
     let mut handled := false
@@ -359,21 +384,49 @@ instance : Fact (NeZero ff) := by sorry
 
 
 lemma aaa {a b : BitVec 2} : a.toNat <= (b.toNat + 4 ) := by
+  --try_apply_lemma_hyps []
+  --apply Nat.le_trans
+ -- apply BitVec.toNatLT
   try_apply_lemma_hyps []
-  apply Nat.le_trans
-  apply BitVec.toNatLT
+  -- simp
 
 
-  simp
+
+lemma aaa1 {a b : BitVec 2} : a.toNat < (b.toNat + 5 ) := by
+  --apply Nat.lt_of_le_of_lt
+  -- try simp
+  -- apply BitVec.toNatLT
+  -- simp
+
+  -- --try_apply_lemma_hyps []
+  -- -- apply Nat.lt_trans
+  -- -- apply Nat.lt_of_le_of_lt
+  -- apply BitVec.toNatLT
+  -- simp
+  try_apply_lemma_hyps []
 
 
--- EXAMPLE 1 that needs to work
+
+
 example { fv : Vector (ZMod ff) 8} :
 ( h1 : fv[0].val ≤ 1) -> (h2 : fv[1].val ≤ 1) -> ( h3 : fv[2].val ≤ 1) ->
 ( fv[0].val * fv[1].val ≤ 1) := by
-try_apply_lemma_hyps []
+  intros h1 h2 h3
+  --apply Nat.le_of_lt_add_one
+--   intros h1 h2 h3
+  try_apply_lemma_hyps [h1, h2 ,h3]
+--apply [Nat.mul_le_mul]
 
 
+example { fv : Vector (ZMod ff) 8} :
+( h1 : fv[0].val ≤ 1) -> (h2 : fv[1].val ≤ 1) -> ( h3 : fv[2].val ≤ 1) ->
+( fv[0].val * fv[1].val < 2) := by
+intros h1 h2 h3
+--apply Nat.lt_of_le_of_lt
+--apply [Nat.lt_of_le_of_lt]
+try_apply_lemma_hyps [h1, h2 ,h3]
+--apply [Nat.mul_le_mul]
 
--- Example 2 that needs to work
--- example { b a : BitVec 2} : a.toNat ≤ b.toNat + 3
+-- --Example 2 that needs to work
+-- example { b a : BitVec 2} : a.toNat ≤ b.toNat + 3 := by
+--   simp [← Nat.lt_add_one_iff]
