@@ -340,15 +340,7 @@ elab_rules : tactic
         updatedGoalsReversed := g :: updatedGoalsReversed
         continue
       setGoals [g] -- focus on one goal at a time
-      let k <- instantiateMVars ty
-      logInfo m! "{k.getAppFnArgs}"
       --let k <- instantiateMVars ty
-      match k.getAppFnArgs with
-        | (_, #[_,_, lhs, rhs]) =>
-          logInfo m! "LHS {lhs.getAppFnArgs}"
-          logInfo m! "RHS {rhs.getAppFnArgs}"
-        -- else false
-        | _ => pure ()
       -- if bothArgsAreApps k then
       --   logInfo m! "WE MADE IT {k}"
       --   try
@@ -385,7 +377,28 @@ elab_rules : tactic
              caseByCaseOnTwoVariables loopBodyReturn g hyps terms
           --try to apply Lean's range analysis lemmas
           logInfo m!"✅ Stuck on {goalType}"
-          findAndApplyRangeAnalysisLemma loopBodyReturn terms g instantiatedGoalType hyps
+          if terms.size >= 1 then
+            findAndApplyRangeAnalysisLemma loopBodyReturn terms g instantiatedGoalType hyps
+          else
+            let rfl ← monadLift (m := TacticM) ``(Nat.le_refl)
+            let (fn, args) := instantiatedGoalType.getAppFnArgs
+ -- logInfo m! "{args[args.size-1]!} => {containsMVar args[args.size-1]!}"
+            let unfolded := ← monadLift $ withTransparency .reducible (whnf args[2]!)
+            let fn3 := unfolded.getAppFn
+               match fn with
+                  | ``LE.le =>
+                    if containsMVar instantiatedGoalType then
+                      match fn3 with
+                        | Expr.const name _ =>
+                          match name with
+                          | ``OfNat.ofNat => applyThisLemma loopBodyReturn g instantiatedGoalType rfl
+                          -- rfl is a place holder should be something else
+                          | _ => pure ()
+                        | _ => pure ()
+                  | _ => pure ()
+            --applyThisLemma loopBodyReturn g instantiatedGoalType rfl
+            --findAndApplyRangeAnalysisLemma loopBodyReturn terms g instantiatedGoalType hyps
+
         -- if other techniques did not work try decide
         try
           monadLift $ do evalTactic (← `(tactic| decide))
@@ -427,18 +440,29 @@ lemma aaa {a b : BitVec 2} : a.toNat <= (b.toNat + 4 ) := by
 
 
 
-lemma aaa1 {a b : BitVec 2} : a.toNat < (b.toNat + 5 ) := by
+lemma aaa1 {a b : BitVec 2} : a.toNat ≤ (b.toNat + 3) := by
   --apply Nat.lt_of_le_of_lt
   -- try simp
   -- apply BitVec.toNatLT
   -- simp
 
+  --  apply Nat.le_trans
+  --  apply BitVec.toNatLT
+  --  apply Nat.le_trans
+   --apply BitVec.toNatLT
+
   try_apply_lemma_hyps []
 
+  --  apply Nat.le_trans
 
+  --  apply BitVec.toNatLT
 
+  --  apply Nat.le_trans
 
-
+  --  apply Nat.lt_sub
+  --  apply Nat.le_trans
+  --  apply Nat.le_refl
+  --  simp
 
 
 example { fv : Vector (ZMod ff) 8} :
@@ -490,3 +514,8 @@ try_apply_lemma_hyps [h1, h2,h3]
 (if fv[0] = 0 then 1 - fv[1].val else fv[1].val )< 2 := by
 intro h1 h2 h3
 try_apply_lemma_hyps [h1, h2, h3]
+
+
+example {b a : BitVec 2} :
+  (a.toNat * (b.toNat + 3 - a.toNat) ≤ 200) := by
+  try_apply_lemma_hyps []

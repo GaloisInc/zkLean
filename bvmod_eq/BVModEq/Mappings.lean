@@ -21,6 +21,14 @@ def bool_to_bv (n: ℕ) (b: Bool) : (BitVec n) := if b then 1#n else 0#n
 def map_bv_to_f {bw} (n: ℕ) (b : BitVec bw) : ZMod n :=
   (b.toNat : ZMod n)
 
+
+def map_f_to_bv_circ {ff : ℕ} n (rs1_val : ZMod ff) : BitVec n :=
+  let m : ℕ := ZMod.val rs1_val
+  if m < 2^n then
+    BitVec.ofNat n m
+  else
+    BitVec.ofNat n 0
+
 def map_f_to_bv {ff : ℕ} n (rs1_val : ZMod ff) : Option (BitVec n) :=
   let m : ℕ := ZMod.val rs1_val
   if m < 2^n then
