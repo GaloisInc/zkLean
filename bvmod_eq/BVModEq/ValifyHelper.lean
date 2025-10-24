@@ -299,10 +299,11 @@ lemma hello {b a : BitVec 2}   :  ( (BVModEq.map_bv_to_f ff a ) *(BVModEq.map_bv
 
 -- + BVModEq.map_bv_to_f ff a * BVModEq.map_bv_to_f ff b ).val  = 10  := by
   unfold BVModEq.map_bv_to_f
-  valify []
+  have ha : a.toNat ≤ 2 ^ 2 - 1 := BitVec.toNatLT
+  valify [ha]
   simp
   rw [ZMod.val_sub_mod]
-  all_goals valify []
+  all_goals valify [ha]
   simp
   nth_rewrite 2 [Nat.mod_eq_of_lt]
   nth_rewrite 2 [Nat.mod_eq_of_lt]
@@ -315,7 +316,9 @@ lemma hello {b a : BitVec 2}   :  ( (BVModEq.map_bv_to_f ff a ) *(BVModEq.map_bv
   simp
   rw [Nat.mod_eq_of_lt]
   rw [Nat.mod_eq_of_lt]
-  focus try_apply_lemma_hyps []
+  try_apply_lemma_hyps []
+
+
 
 
 
@@ -397,7 +400,7 @@ lemma hello {b a : BitVec 2}   :  ( (BVModEq.map_bv_to_f ff a ) *(BVModEq.map_bv
 
 example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[2].val <= 1 ) -> ( (1: ZMod ff) - ( (fv[0]*fv[1]) + (1-fv[0])*( 1 -fv[1]))).val < 7 := by
   intro h1 h2 h3
-  valify []
+  valify [h1, h2, h3]
   rw [ZMod.val_sub_mod]
   all_goals valify [h1,h2,h3]
   simp
@@ -405,6 +408,7 @@ example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[
   --nth_rewrite 2 [Nat.mod_eq_of_lt]
   rw [Nat.mod_eq_of_lt]
   focus try_apply_lemma_hyps [h1, h2, h3]
+
   focus try_apply_lemma_hyps [h1, h2, h3]
   focus try_apply_lemma_hyps [h1, h2, h3]
   simp
@@ -413,6 +417,7 @@ example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[
   --decide
 
   try_apply_lemma_hyps [h1, h2, h3]
+
 
 
 
