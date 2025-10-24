@@ -358,20 +358,10 @@ example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[
   valify [h1, h2, h3]
   try simp
   rw [Nat.mod_eq_of_lt]
-  focus try_apply_lemma_hyps [h1, h2, h3]
-  focus try_apply_lemma_hyps [h1, h2, h3]
-  focus try_apply_lemma_hyps [h1, h2, h3]
-  intro NatLeq
-  rw [ZMod.val_sub_mod]
-  valify []
+  simp [<- Nat.lt_add_one_iff]
+  --focus try_apply_lemma_hyps [h1, h2, h3]
 
 
-  norm_num
-  nth_rewrite 2 [Nat.mod_eq_of_lt]
-  nth_rewrite 2 [Nat.mod_eq_of_lt]
-  simp
-  focus try_apply_lemma_hyps [h1, h2, h3]
-  apply NatLeq
 
 
 

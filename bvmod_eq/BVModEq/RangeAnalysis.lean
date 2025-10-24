@@ -151,8 +151,22 @@ def didMux : TacticM Unit := do
 
 def bothArgsAreApps (e : Expr) : Bool :=
   match e.getAppFnArgs with
-  | (_, #[lhs, rhs]) =>
-    lhs.isApp || rhs.isApp  -- or `&&` if you want *both* sides to be `.app`
+  | (_, #[_,_, lhs, rhs]) =>
+
+    --if lhs.isApp && rhs.isApp then
+      match lhs  with
+        | .const ``OfNat.ofNat _ => false
+        | .const ``BitVec.toNat _ => false
+        | .const ``ZMod.val _ => false
+        | .app f x =>
+          match rhs with
+          | .const ``OfNat.ofNat _ => false
+          | .const ``BitVec.toNat _ => false
+          | .const ``ZMod.val _ => false
+          | .app f x => true
+          | _ => false
+        | _ => false
+   -- else false
   | _ => false
 
 structure LoopBodyResult where
@@ -306,9 +320,9 @@ elab_rules : tactic
   evalTactic (← `(tactic| try all_goals simp [Nat.mul_assoc]))
   let mut did_mux := false
   -- as long as we are making progress then continue
-  let mut count := 0
-  while (progress ∧ count < 10) do
-    count := count + 1
+  --let mut count := 0
+  while (progress ) do
+   -- count := count + 1
     if did_mux then do
       didMux
       did_mux := false
@@ -326,15 +340,25 @@ elab_rules : tactic
         updatedGoalsReversed := g :: updatedGoalsReversed
         continue
       setGoals [g] -- focus on one goal at a time
-      if bothArgsAreApps ty then
-        try
-          evalTactic (← `(tactic| simp))
-          if (← g.isAssigned) then
-            updatedGoalsReversed := g :: updatedGoalsReversed
-            continue
-          g <- getMainGoal
-          setGoals [g]
-        catch _ => pure ()
+      let k <- instantiateMVars ty
+      logInfo m! "{k.getAppFnArgs}"
+      --let k <- instantiateMVars ty
+      match k.getAppFnArgs with
+        | (_, #[_,_, lhs, rhs]) =>
+          logInfo m! "LHS {lhs.getAppFnArgs}"
+          logInfo m! "RHS {rhs.getAppFnArgs}"
+        -- else false
+        | _ => pure ()
+      -- if bothArgsAreApps k then
+      --   logInfo m! "WE MADE IT {k}"
+      --   try
+      --     evalTactic (← `(tactic| simp))
+      --     g <- getMainGoal
+      --     if (← g.isAssigned) then
+      --       updatedGoalsReversed := g :: updatedGoalsReversed
+      --       continue
+      --     setGoals [g]
+      --   catch _ => pure ()
 
       let goalType ← g.getType
       -- first we try to apply hypothesis
@@ -378,6 +402,7 @@ elab_rules : tactic
     -- Note: we built the updated goals list in reverse to avoid repeatedly
     -- traversing an ever-growingly long prefix.
     setGoals (updatedGoalsReversed.reverse ++ goalQueue.dList ++ goalQueue.eList.reverse)
+  evalTactic (← `(tactic| try apply Nat.le_refl; try simp))
 
 
 abbrev ff := 52435875175126190479447740508185965837690552500527637822603658699938581184513
@@ -396,7 +421,6 @@ instance : Fact (NeZero ff) := by sorry
 
 lemma aaa {a b : BitVec 2} : a.toNat <= (b.toNat + 4 ) := by
   --try_apply_lemma_hyps []
-  apply Nat.le_trans
   --apply BitVec.toNatLT
   try_apply_lemma_hyps []
   -- simp
@@ -409,11 +433,9 @@ lemma aaa1 {a b : BitVec 2} : a.toNat < (b.toNat + 5 ) := by
   -- apply BitVec.toNatLT
   -- simp
 
-  -- --try_apply_lemma_hyps []
+  try_apply_lemma_hyps []
 
-  apply Nat.lt_of_le_of_lt
-  apply BitVec.toNatLT
-  simp
+
 
 
 
@@ -449,7 +471,7 @@ try_apply_lemma_hyps [h1, h2, h3]
 -- example { b a : BitVec 2} : a.toNat ≤ b.toNat + 3 := by
 --   simp [← Nat.lt_add_one_iff]
 
- example {fv : Vector (ZMod ff) 8}:
+example {fv : Vector (ZMod ff) 8}:
 (h1 : fv[0].val ≤ 1) ->
 (h2 : fv[1].val ≤ 1) ->
 (h3 : fv[2].val ≤ 1) ->
@@ -457,6 +479,7 @@ try_apply_lemma_hyps [h1, h2, h3]
 
 intros h1 h2 h3
 try_apply_lemma_hyps [h1, h2,h3]
+
 
 
 -- example { b a : BitVec 2} : a.toNat ≤
