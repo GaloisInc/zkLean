@@ -53,7 +53,7 @@ partial def pushValToNat (n : Expr) (t : Expr) : MetaM Expr := do
       let a' ← pushValToNat n a
       let b' ← pushValToNat n b
       return mkApp2 (mkConst ``Nat.add) a' b'
-    else if name == ``HSub.hSub || name == ``Sub.sub then
+    if name == ``HSub.hSub || name == ``Sub.sub then
       -- binary sub: ... a b (literal Nat subtraction)
       let a := args[args.size - 2]!
       let b := args[args.size - 1]!
@@ -115,33 +115,38 @@ syntax (name := findInsideVal) "findInsideVal" (ppSpace "=>" ident)? : tactic
 
 set_option maxHeartbeats  20000000000000000000
 
-lemma ZMod.val_sub_mod (h0 : Fact (1 < ff)) (h : x.val ≤ (1 : ZMod ff).val)
-  : ((1 : ZMod ff) - x).val = (1 - x.val)%ff := by
-  valify [h0] at h
-  valify [h]
+lemma ZMod.val_sub_mod {ff: ℕ} [h: NeZero ff] {y x : ZMod ff}  (h : x.val ≤ y.val)
+  : (y - x).val = (y.val - x.val) % ff := by
+  rw [ZMod.val_sub]
+  sorry
+
+
+
+
+
+lemma Nat.val_sub_mod {ff x y: ℕ}  (hx: x < ff) (hy: y < ff)
+  : (  y % ff - (x%ff))%ff = (y - x)%ff := by
   rw [Nat.mod_eq_of_lt]
-  try_apply_lemma_hyps [h]
-  apply h0.out
-
-
-lemma Nat.val_sub_mod (h0 : Fact (1 < ff)) (h : x ≤ 1)
-  : (1 - (x%ff))%ff = (1 - x)%ff := by
   rw [Nat.mod_eq_of_lt]
   rw [Nat.mod_eq_of_lt]
   rw [Nat.mod_eq_of_lt]
   apply Nat.lt_of_le_of_lt
   apply Nat.sub_le
-  apply h0.out
-  apply Nat.lt_of_le_of_lt
-  apply h
-  apply h0.out
+  apply hy
+  apply hx
+  apply hy
   rw [Nat.mod_eq_of_lt]
-  apply Nat.lt_of_le_of_lt
-  apply Nat.sub_le
-  apply h0.out
-  apply Nat.lt_of_le_of_lt
-  apply h
-  apply h0.out
+  rw [Nat.mod_eq_of_lt]
+  apply  Nat.lt_of_le_of_lt
+  apply Nat.lt_sub
+  apply hy
+  apply hx
+  apply hy
+
+
+
+
+
 
 
 def assertFirstAcrossGoals (name : Name) : TacticM Unit := do
@@ -208,25 +213,25 @@ elab_rules : tactic
     let gWithHyp ← g.withContext do g.assert `vNat prop pr
     let gWithHyp2 ← g.withContext do gWithHyp.assert `subleq prop2 pr2
     setGoals [pr2.mvarId!, hm, gWithHyp2]
-    let mut g ← getMainGoal
-    logInfo m!"G0: {g}"
-    evalTactic (← `(tactic| valify [$[$sargs],*]; ))
-    evalTactic (← `(tactic| try simp; ))
-    evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]; simp [← Nat.lt_add_one_iff]))
-    assertFirstAcrossGoals `h
-    g ← getMainGoal
-    logInfo m!"G1: {g}"
-    evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
-    g ← getMainGoal
-    logInfo m!"G2: {g}"
-    evalTactic (← `(tactic| intro NatLeq))
-    evalTactic (← `(tactic|
-      exact Nat.lt_of_lt_of_le NatLeq (by decide)))
-    g ← getMainGoal
-    evalTactic (← `(tactic|
-      intro NatLeq ))
-    evalTactic (← `(tactic|
-      exact Nat.lt_of_lt_of_le NatLeq (by decide)))
+    -- let mut g ← getMainGoal
+    -- logInfo m!"G0: {g}"
+    -- evalTactic (← `(tactic| valify [$[$sargs],*]; ))
+    -- evalTactic (← `(tactic| try simp; ))
+    -- evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]; simp [← Nat.lt_add_one_iff]))
+    -- assertFirstAcrossGoals `h
+    -- g ← getMainGoal
+    -- logInfo m!"G1: {g}"
+    -- evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
+    -- g ← getMainGoal
+    -- logInfo m!"G2: {g}"
+    -- evalTactic (← `(tactic| intro NatLeq))
+    -- evalTactic (← `(tactic|
+    --   exact Nat.lt_of_lt_of_le NatLeq (by decide)))
+    -- g ← getMainGoal
+    -- evalTactic (← `(tactic|
+    --   intro NatLeq ))
+    -- evalTactic (← `(tactic|
+    --   exact Nat.lt_of_lt_of_le NatLeq (by decide)))
     -- evalTactic (← `(tactic|
     --   intro NatLeq
     --   intro Leq
@@ -239,6 +244,34 @@ elab_rules : tactic
     -- evalTactic (← `(tactic| simp [← Nat.lt_add_one_iff]; apply NatLeq))
 
 
+
+
+lemma Nat.sub_mod {a b n: ℕ} (h1: a < n) (h2: b< n) : (a - b) = (a-b) %n  := by
+sorry
+
+
+
+
+
+
+  -- intro NatLeq
+  -- intro Leq
+  -- valify [h1, h2, h3]
+  -- simp
+  -- --try simp [ZMod.val_sub_mod Leq]
+  -- rw [ZMod.val_sub]
+  -- --rw [Nat.mod_eq_of_lt]
+  -- valify [h1, h2, h3]
+  -- rw [Nat.mod_eq_of_lt]
+  -- rw [Nat.mod_eq_of_lt]
+  -- try_apply_lemma_hyps [h1, h2, h3]
+  -- apply Leq
+  -- try_apply_lemma_hyps []
+
+
+
+-- TODO : get try_apply_lemma_hyps to worj for  x <= 1
+
 abbrev ff := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 
 instance : Fact (Nat.Prime ff) := by sorry
@@ -250,31 +283,118 @@ instance NotTwo: BVModEq.GtTwo (ff) := by
   sorry
 
 
-example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[2].val <= 1 ) -> ( (1: ZMod ff) - ( (fv[0]*fv[1]  ))).val < 7 := by
-  intro h1 h2 h3
-  valify_helper [h1, h2, h3]
-  intro NatLeq
-  intro Leq
-  valify [h1, h2, h3]
-  simp
-  --try simp [ZMod.val_sub_mod Leq]
-  rw [ZMod.val_sub]
-  --rw [Nat.mod_eq_of_lt]
-  valify [h1, h2, h3]
-  rw [Nat.mod_eq_of_lt]
-  rw [Nat.mod_eq_of_lt]
-  try_apply_lemma_hyps []
-  apply Nat.lt_succ_iff.mp NatLeq
-  try_apply_lemma_hyps []
+lemma help {a b n: ℕ} : (a % n = b %n) -> a =b  := by sorry
 
-  rw [Nat.val_sub_mod]
-
-
-
-lemma hello {b a : BitVec 2} : (BVModEq.map_bv_to_f ff b + 3 - BVModEq.map_bv_to_f ff a).val = (BVModEq.map_bv_to_f ff b).val + 3 - (BVModEq.map_bv_to_f ff a).val := by
+lemma hello {b a : BitVec 2}   : (BVModEq.map_bv_to_f ff b + 3 - BVModEq.map_bv_to_f ff a).val  = 10  := by
   unfold BVModEq.map_bv_to_f
-  simp
   valify_helper []
+  valify []
+  try simp
+  rw [Nat.mod_eq_of_lt]
+  rw [Nat.mod_eq_of_lt]
+  focus try_apply_lemma_hyps [h1, h2, h3]
+  focus try_apply_lemma_hyps [h1, h2, h3]
+  focus try_apply_lemma_hyps [h1, h2, h3]
+  intro NatLeq
+  valify []
+  simp
+  rw [ZMod.val_sub_mod]
+  valify []
+
+  norm_num
+  nth_rewrite 2 [Nat.mod_eq_of_lt]
+  nth_rewrite 2 [Nat.mod_eq_of_lt]
+  nth_rewrite 2 [Nat.mod_eq_of_lt]
+  nth_rewrite 2 [Nat.mod_eq_of_lt]
+  nth_rewrite 2 [Nat.mod_eq_of_lt]
+  rw [Nat.mod_eq_of_lt]
+  try_apply_lemma_hyps [h1, h2, h3]
+  apply NatLeq
+
+
+
+  --rw [Nat.mod_eq_of_lt]
+
+
+
+
+  simp
+
+
+  --rw [Nat.mod_eq_of_lt]
+
+
+
+
+
+
+
+
+  -- rw [Nat.sub_mod]
+  -- rw [Nat.mod_eq_of_lt]
+  -- rw [Nat.mod_eq_of_lt]
+  -- rw [Nat.mod_eq_of_lt]
+  -- focus try_apply_lemma_hyps [h1, h2, h3]
+  -- focus try_apply_lemma_hyps [h1, h2, h3]
+  -- focus try_apply_lemma_hyps [h1, h2, h3]
+  -- rw [Nat.mod_eq_of_lt]
+  -- focus try_apply_lemma_hyps [h1, h2, h3]
+  -- focus try_apply_lemma_hyps [h1, h2, h3]
+  -- rw [Nat.mod_eq_of_lt]
+  --  focus try_apply_lemma_hyps [h1, h2, h3]
+  -- focus try_apply_lemma_hyps [h1, h2, h3]
+  -- apply NatLeq
+
+
+
+
+
+
+
+
+example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[2].val <= 1 ) -> ( (1: ZMod ff) - ( (fv[0]*fv[1]) + (1-fv[0])*( 1 -fv[1]))).val < 7 := by
+  intro h1 h2 h3
+  valify_helper []
+  valify [h1, h2, h3]
+  try simp
+  rw [Nat.mod_eq_of_lt]
+  focus try_apply_lemma_hyps [h1, h2, h3]
+  focus try_apply_lemma_hyps [h1, h2, h3]
+  focus try_apply_lemma_hyps [h1, h2, h3]
+  intro NatLeq
+  rw [ZMod.val_sub_mod]
+  valify []
+
+
+  norm_num
+  nth_rewrite 2 [Nat.mod_eq_of_lt]
+  nth_rewrite 2 [Nat.mod_eq_of_lt]
+  simp
+  focus try_apply_lemma_hyps [h1, h2, h3]
+  apply NatLeq
+
+
+
+
+
+
+
+
+  -- rw [<- Nat.sub_mod]
+  -- rw [Nat.mod_eq_of_lt]
+  --try_apply_lemma_hyps [h1, h2, h3]
+
+
+
+
+
+
+
+
+
+
+
+
   -- rw [ZMod.val_sub]
   -- valify []
   -- simp

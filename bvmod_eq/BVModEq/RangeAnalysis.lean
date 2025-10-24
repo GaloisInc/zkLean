@@ -30,6 +30,7 @@ def mkAddNat (es : List Expr) : Expr :=
   | [e]     => e
   | e :: es => mkApp2 (mkConst ``Nat.add) e (mkAddNat es)
 
+
 -- rebeuilding a mux expression factored
 def rebuild (x sumA sumB : Expr) : MetaM Expr := do
   let one       := mkNatLit 1
@@ -38,6 +39,13 @@ def rebuild (x sumA sumB : Expr) : MetaM Expr := do
   let term2     := mkApp2 (mkConst ``Nat.mul) oneMinusX sumB
   let res       := mkApp2 (mkConst ``Nat.add) term2 term1
   return res
+
+partial def containsMVar (e : Expr) : Bool :=
+  --ogInfo m! "CHECKING {e}"
+  match e with
+  | .mvar _ => true
+  | .app f x => containsMVar f || containsMVar x
+  | _ => false
 
 -- Inspects the expression to possibly extract mux elements.
 -- Ex: xA + (1-x)B + xC --> some (x, [A,C], [B])
@@ -141,6 +149,12 @@ def didMux : TacticM Unit := do
   evalTactic (← `(tactic| try simp [hMux]))
   evalTactic (← `(tactic| try rw [Nat.mux_if_then] at ⊢))
 
+def bothArgsAreApps (e : Expr) : Bool :=
+  match e.getAppFnArgs with
+  | (_, #[lhs, rhs]) =>
+    lhs.isApp || rhs.isApp  -- or `&&` if you want *both* sides to be `.app`
+  | _ => false
+
 structure LoopBodyResult where
   didMux : Bool
   madeProgress : Bool
@@ -236,24 +250,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
   let expLeq ← monadLift (m := TacticM) ``(Nat.le_trans)
   let constLeq ← monadLift (m := TacticM) ``(Nat.le_of_lt_add_one)
   let (fn, args) := mainGoalType.getAppFnArgs
-  let mut metPresent := false
-  match args[args.size-1]!.getAppFn with
-    | .mvar id =>
-        logInfo m! "metavariable: {id.name}"
-    | .const ``OfNat.ofNat _ =>
-      logInfo "numeric literal (via OfNat.ofNat)"
-    | .const name _ =>
-        logInfo m! "constant: {name}"
-    | .lit lit =>
-        logInfo m! "literal"
-    | .fvar id =>
-        logInfo m! "free variable: {id.name}"
-    | .bvar n =>
-       logInfo m! "bound variable #{n}"
-    | .app f x =>
-        logInfo m! "application:"
-    | _ =>
-        logInfo m! "other expression"
+  logInfo m! "{args[args.size-1]!} => {containsMVar args[args.size-1]!}"
   let unfolded := ← monadLift $ withTransparency .reducible (whnf args[2]!)
   let fn3 := unfolded.getAppFn
   if (terms.size > 0) then
@@ -270,8 +267,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
     | _ => pure ()
   match fn with
   | ``LE.le =>
-    match  args[args.size-1]!.getAppFn with
-      |  .mvar _ =>
+    if containsMVar mainGoalType then
       match fn3 with
         | Expr.const name _ =>
           match name with
@@ -287,8 +283,10 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
             pure ()
         | _ =>
           if fn3.isFVar then applyZModLemma loopBodyReturn g hyps
-      | .const ``OfNat.ofNat _ => applyThisLemma constLeq
-      | _ => applyThisLemma expLeq
+      else
+         match  args[args.size-1]!.getAppFn with
+        | .const ``OfNat.ofNat _ => applyThisLemma constLeq
+        | _ => applyThisLemma expLeq
   | _ => pure ()
 
 @[tactic tryApplyLemHyps]
@@ -308,11 +306,12 @@ elab_rules : tactic
   evalTactic (← `(tactic| try all_goals simp [Nat.mul_assoc]))
   let mut did_mux := false
   -- as long as we are making progress then continue
-  while progress do
+  let mut count := 0
+  while (progress ∧ count < 10) do
+    count := count + 1
     if did_mux then do
       didMux
       did_mux := false
-    evalTactic (← `(tactic| try simp))
     let goals ← getGoals
     let mut updatedGoalsReversed : List MVarId := [] -- to keep track of goals we changed
     let mut handled := false
@@ -320,16 +319,27 @@ elab_rules : tactic
     -- Note: do not use `enqueueAll` as it would need reversing the list
     let mut goalQueue := Std.Queue.mk [] goals
     while (not handled && not goalQueue.isEmpty) do
-      let some (g, rest) := goalQueue.dequeue? | unreachable!
+      let mut some (g, rest) := goalQueue.dequeue? | unreachable!
       goalQueue := rest
+      let ty <- g.getType
       if (← g.isAssigned) then
         updatedGoalsReversed := g :: updatedGoalsReversed
         continue
       setGoals [g] -- focus on one goal at a time
+      if bothArgsAreApps ty then
+        try
+          evalTactic (← `(tactic| simp))
+          if (← g.isAssigned) then
+            updatedGoalsReversed := g :: updatedGoalsReversed
+            continue
+          g <- getMainGoal
+          setGoals [g]
+        catch _ => pure ()
+
       let goalType ← g.getType
       -- first we try to apply hypothesis
       let instantiatedGoalType ← instantiateMVars goalType
-      let (_fn, args) := instantiatedGoalType.getAppFnArgs
+      let (fn, args) := instantiatedGoalType.getAppFnArgs
       let terms ← collectTerms instantiatedGoalType
       -- Note: Here we use a continuation to let our callees return by
       -- short-circuiting the rest of the computation.
@@ -350,6 +360,7 @@ elab_rules : tactic
           if terms.size == 2 && (← containsSub instantiatedGoalType) then
              caseByCaseOnTwoVariables loopBodyReturn g hyps terms
           --try to apply Lean's range analysis lemmas
+          logInfo m!"✅ Stuck on {goalType}"
           findAndApplyRangeAnalysisLemma loopBodyReturn terms g instantiatedGoalType hyps
         -- if other techniques did not work try decide
         try
@@ -385,8 +396,8 @@ instance : Fact (NeZero ff) := by sorry
 
 lemma aaa {a b : BitVec 2} : a.toNat <= (b.toNat + 4 ) := by
   --try_apply_lemma_hyps []
-  --apply Nat.le_trans
- -- apply BitVec.toNatLT
+  apply Nat.le_trans
+  --apply BitVec.toNatLT
   try_apply_lemma_hyps []
   -- simp
 
@@ -399,11 +410,11 @@ lemma aaa1 {a b : BitVec 2} : a.toNat < (b.toNat + 5 ) := by
   -- simp
 
   -- --try_apply_lemma_hyps []
-  -- -- apply Nat.lt_trans
-  -- -- apply Nat.lt_of_le_of_lt
-  -- apply BitVec.toNatLT
-  -- simp
-  try_apply_lemma_hyps []
+
+  apply Nat.lt_of_le_of_lt
+  apply BitVec.toNatLT
+  simp
+
 
 
 
@@ -428,5 +439,31 @@ try_apply_lemma_hyps [h1, h2 ,h3]
 --apply [Nat.mul_le_mul]
 
 -- --Example 2 that needs to work
+
+example {fv : Vector (ZMod ff) 8}:
+(h1 : fv[0].val ≤ 1) ->
+(h2 : fv[1].val ≤ 1) ->
+(h3 : fv[2].val ≤ 1) ->  (1 - fv[0].val * fv[1].val < ff) := by
+intros h1 h2 h3
+try_apply_lemma_hyps [h1, h2, h3]
 -- example { b a : BitVec 2} : a.toNat ≤ b.toNat + 3 := by
 --   simp [← Nat.lt_add_one_iff]
+
+ example {fv : Vector (ZMod ff) 8}:
+(h1 : fv[0].val ≤ 1) ->
+(h2 : fv[1].val ≤ 1) ->
+(h3 : fv[2].val ≤ 1) ->
+(fv[0].val * fv[1].val + (1 - fv[0].val) * (1 - fv[1].val) <= 1) := by
+
+intros h1 h2 h3
+try_apply_lemma_hyps [h1, h2,h3]
+
+
+-- example { b a : BitVec 2} : a.toNat ≤
+ example {fv : Vector (ZMod ff) 8}:
+(h1 : fv[0].val ≤ 1) ->
+(h2 : fv[1].val ≤ 1) ->
+(h3 : fv[2].val ≤ 1) ->
+(if fv[0] = 0 then 1 - fv[1].val else fv[1].val )< 2 := by
+intro h1 h2 h3
+try_apply_lemma_hyps [h1, h2, h3]
