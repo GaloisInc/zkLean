@@ -315,6 +315,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
         | _ =>
           if fn3.isFVar then applyZModLemma loopBodyReturn g hyps
       else
+        logInfo m! "{args[args.size-1]!.getAppFn}"
          match  args[args.size-1]!.getAppFn with
         | .const ``OfNat.ofNat _ => applyThisLemma constLeq
         | _ =>
@@ -475,6 +476,13 @@ elab_rules : tactic
     if (!progress) then
       try
         logInfo m!"We are here"
+        evalTactic (← `(tactic| omega))
+        --handled := true; progress := true
+        progress:= true
+      catch _ => pure ()
+    if (!progress) then
+      try
+        logInfo m!"We are here"
         evalTactic (← `(tactic| simp))
         --handled := true; progress := true
         progress:= true
@@ -607,3 +615,7 @@ example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[
 lemma hello {b a : BitVec 2} : a.toNat * ((((b.toNat) + 3 % ff) % ff - (a.toNat)) % ff) % ff ≤ 200 /\ (a.toNat) ≤ ((b.toNat) + 3 % ff) % ff := by
   split_ands
   try_apply_lemma_hyps []
+
+
+example {a:BitVec 2} : 8+ a.toNat >= 6  := by
+ try_apply_lemma_hyps []
