@@ -59,10 +59,9 @@ partial def countAnds (e : Expr) : Nat :=
       | _ => 0
 
 
-
-
 syntax (name := translateGoal)
   "translate_goal" ppSpace ("[" ident,* "]")? : tactic
+
 
 @[tactic translateGoal]
 elab_rules : tactic
@@ -94,6 +93,63 @@ elab_rules : tactic
       evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
   evalTactic (← `(tactic| bvify [$[$sargs],*]))
 
+def isZModIdemEq (e : Expr) : Option Expr :=
+  match e with
+  | .app (.app (.app (.const ``Eq _) _) lhs) rhs =>
+    let f := lhs.getAppFn
+    if f.isConstOf ``HMul.hMul || f.isConstOf ``Mul.mul then
+      let args := lhs.getAppArgs
+      if args.size ≥ 2 then
+        let a := args[args.size - 2]!
+        let b := args[args.size - 1]!
+        if a == rhs && b == rhs then some rhs else none
+      else none
+    else none
+  | _ => none
+
+def smartTranslateOne (h : TSyntax `ident)
+    (extraArgs :
+      Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+                      `Lean.Parser.Tactic.simpErase,
+                      `Lean.Parser.Tactic.simpLemma])) : TacticM Unit := do
+  let decl ← getLocalDeclFromUserName h.getId
+  let ty   := decl.type
+  match isZModIdemEq ty with
+  | some _ =>
+      /- Case 1: x * x = x  → rewrite + rcases -/
+      evalTactic (← `(tactic| rw [BVModEq.square_eq_one_zero 256] at $(mkIdent h.getId):ident))
+      -- Automatically generate `rcases h with ⟨h_1, h_2⟩`
+      let base := h.getId.toString
+      let h1 := mkIdent (Name.mkSimple s!"{base}_1")
+      let h2 := mkIdent (Name.mkSimple s!"{base}_2")
+      evalTactic (← `(tactic| rcases $(mkIdent h.getId):ident with ⟨$h1, $h2⟩))
+  | none =>
+      /- Case 2: Anything else → normal translate_hypothesis -/
+      if extraArgs.isEmpty then
+        evalTactic (← `(tactic| translate_hypothesis $h))
+      else
+        evalTactic (← `(tactic| translate_hypothesis $h [$$extraArgs,*]))
+
+
+syntax (name := smartTranslate) "smart_translate" ppSpace
+  ("[" ident,* "]")? : tactic
+
+@[tactic smartTranslate]
+elab_rules : tactic
+| `(tactic| smart_translate $[[ $ids,* ]]?) => withMainContext do
+  let extraArgs :
+    Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+                    `Lean.Parser.Tactic.simpErase,
+                    `Lean.Parser.Tactic.simpLemma]) := #[]
+
+  match ids with
+  | some idList =>
+      for h in idList.getElems do
+        smartTranslateOne h extraArgs
+  | none =>
+      for ldecl in (← getLCtx) do
+        if !ldecl.isImplementationDetail then
+          smartTranslateOne (mkIdent ldecl.userName) extraArgs
 
 
 abbrev FF0 : Type := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
@@ -136,42 +192,10 @@ lemma correct :
   h11, h12, h13, h14, h15, h16, h17, h18, h19, h20,
   h21, h22, h23, h24, h25, h26, h27, h28, h29, h30,
   h31, h32⟩
-  rw [BVModEq.square_eq_one_zero 256] at h1 h2 h3 h5 h6 h7 h9 h10 h11 h13 h14 h15  h17 h18 h19  h21 h22 h23  h25 h26 h27 h29 h30 h31
-  --
-  rcases h1 with ⟨h1_1, h1_2⟩
-  rcases h2 with ⟨h2_1, h2_2⟩
-  rcases h3 with ⟨h3_1, h3_2⟩
-  rcases h5 with ⟨h5_1, h5_2⟩
-  rcases h6 with ⟨h6_1, h6_2⟩
-  rcases h7 with ⟨h7_1, h7_2⟩
-  rcases h9 with ⟨h9_1, h9_2⟩
-  rcases h10 with ⟨h10_1, h10_2⟩
-  rcases h11 with ⟨h11_1, h11_2⟩
-
-  rcases h13 with ⟨h13_1, h13_2⟩
-  rcases h14 with ⟨h14_1, h14_2⟩
-  rcases h15 with ⟨h15_1, h15_2⟩
-  rcases h17 with ⟨h17_1, h17_2⟩
-  rcases h18 with ⟨h18_1, h18_2⟩
-  rcases h19 with ⟨h19_1, h19_2⟩
-  rcases h21 with ⟨h21_1, h21_2⟩
-  rcases h22 with ⟨h22_1, h22_2⟩
-  rcases h23 with ⟨h23_1, h23_2⟩
-  rcases h25 with ⟨h25_1, h25_2⟩
-  rcases h26 with ⟨h26_1, h26_2⟩
-  rcases h27 with ⟨h27_1, h27_2⟩
-  rcases h29 with ⟨h29_1, h29_2⟩
-  rcases h30 with ⟨h30_1, h30_2⟩
-  rcases h31 with ⟨h31_1, h31_2⟩
-
-  translate_hypothesis h4
-  translate_hypothesis h8
-  translate_hypothesis h12
-  translate_hypothesis h16
-  translate_hypothesis h20
-  translate_hypothesis h24
-  translate_hypothesis h28
-  translate_hypothesis h32
+  smart_translate [h1, h2, h3, h4, h5, h6, h7, h8, h9, h10,
+  h11, h12, h13, h14, h15, h16, h17, h18, h19, h20,
+  h21, h22, h23, h24, h25, h26, h27, h28, h29, h30,
+  h31, h32]
   translate_goal
   bv_decide
   try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1,
