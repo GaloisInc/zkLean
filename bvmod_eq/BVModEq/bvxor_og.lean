@@ -1,4 +1,6 @@
 import BVModEq.SolveMLE
+open Lean Meta Elab Tactic
+open Lean.Parser.Tactic
 
 abbrev ff := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 instance : Fact (Nat.Prime ff) := by sorry
@@ -10,6 +12,89 @@ instance NotTwo: BVModEq.GtTwo (ff) := by
   sorry
 
 set_option maxHeartbeats  20000000000000000000
+
+
+syntax (name := translateHypothesis) "translate_hypothesis" ppSpace ident ("[" ident,* "]")? : tactic
+
+
+@[tactic translateHypothesis]
+elab_rules : tactic
+| `(tactic| translate_hypothesis $h:ident $[ [ $ids,* ] ]? ) => withMainContext do
+  /- Build simpArg array (empty if none provided) -/
+  let mut sargs :
+    Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+                    `Lean.Parser.Tactic.simpErase,
+                    `Lean.Parser.Tactic.simpLemma]) := #[]
+  if let some idList := ids then
+    for i in idList.getElems do
+      let sa ← `(simpArg| $i:term)
+      let ua : TSyntax [`Lean.Parser.Tactic.simpStar,
+                        `Lean.Parser.Tactic.simpErase,
+                        `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
+      sargs := sargs.push ua
+  evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| simp [BVModEq.ZMod.eq_if_val] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| valify [$[$sargs],*] at $(mkIdent h.getId):ident) )
+  evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
+  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
+
+
+partial def countAnds (e : Expr) : Nat :=
+   match e with
+  | .const ``And _ =>
+      let args := e.getAppArgs
+      if h : args.size ≥ 2 then
+        let a := args[0]!
+        let b := args[1]!
+        1 + countAnds a + countAnds b
+      else
+        1
+  | _ =>
+      match e with
+      | .app f x => countAnds f + countAnds x
+      | _ => 0
+
+
+
+
+syntax (name := translateGoal)
+  "translate_goal" ppSpace ("[" ident,* "]")? : tactic
+
+@[tactic translateGoal]
+elab_rules : tactic
+| `(tactic| translate_goal $[[ $ids,* ]]?) => withMainContext do
+  /- Build simpArg array (empty if none provided) -/
+  let mut sargs :
+    Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+                    `Lean.Parser.Tactic.simpErase,
+                    `Lean.Parser.Tactic.simpLemma]) := #[]
+  if let some idList := ids then
+    for i in idList.getElems do
+      let sa ← `(simpArg| $i:term)
+      let ua : TSyntax [`Lean.Parser.Tactic.simpStar,
+                        `Lean.Parser.Tactic.simpErase,
+                        `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
+      sargs := sargs.push ua
+  evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv ))
+  evalTactic (← `(tactic| simp [BVModEq.ZMod.eq_if_val]))
+  evalTactic (← `(tactic| valify [$[$sargs],*] ) )
+  evalTactic (← `(tactic| try simp ) )
+  --evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
+  --evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] ))
+  evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
+  evalTactic (← `(tactic| bvify [$[$sargs],*]))
+  let g ← getMainGoal
+  let t ← g.getType
+  let n := countAnds t
+  for _ in [:n] do
+      evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
+  evalTactic (← `(tactic| bvify [$[$sargs],*]))
+
+
 
 abbrev FF0 : Type := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
 variable (fresh_pf21_xor_bit0 : FF0)
@@ -52,6 +137,7 @@ lemma correct :
   h21, h22, h23, h24, h25, h26, h27, h28, h29, h30,
   h31, h32⟩
   rw [BVModEq.square_eq_one_zero 256] at h1 h2 h3 h5 h6 h7 h9 h10 h11 h13 h14 h15  h17 h18 h19  h21 h22 h23  h25 h26 h27 h29 h30 h31
+  --
   rcases h1 with ⟨h1_1, h1_2⟩
   rcases h2 with ⟨h2_1, h2_2⟩
   rcases h3 with ⟨h3_1, h3_2⟩
@@ -77,89 +163,16 @@ lemma correct :
   rcases h29 with ⟨h29_1, h29_2⟩
   rcases h30 with ⟨h30_1, h30_2⟩
   rcases h31 with ⟨h31_1, h31_2⟩
-  rw [BVModEq.ZMod.eq_if_val] at h4
-  valify [h1_1, h2_1, h3_1] at h4
-  simp at h4
-  rw [Nat.mod_eq_of_lt] at h4
-  rw [Nat.mod_eq_of_lt] at h4
-  rw [BVModEq.ZMod.eq_if_val] at h8
-  valify [h1_1, h2_1, h3_1] at h8
-  simp at h8
-  rw [Nat.mod_eq_of_lt] at h8
-  rw [Nat.mod_eq_of_lt] at h8
-  rw [BVModEq.ZMod.eq_if_val] at h12
-  valify [h1_1, h2_1, h3_1] at h12
-  simp at h12
-  rw [Nat.mod_eq_of_lt] at h12
-  rw [Nat.mod_eq_of_lt] at h12
-  rw [BVModEq.ZMod.eq_if_val] at h16
-  valify [h1_1, h2_1, h3_1] at h16
-  simp at h16
-  rw [Nat.mod_eq_of_lt] at h16
-  rw [Nat.mod_eq_of_lt] at h16
-  rw [BVModEq.ZMod.eq_if_val] at h20
-  valify [h1_1, h2_1, h3_1] at h20
-  simp at h20
-  rw [Nat.mod_eq_of_lt] at h20
-  rw [Nat.mod_eq_of_lt] at h20
-  rw [BVModEq.ZMod.eq_if_val] at h24
-  valify [h1_1, h2_1, h3_1] at h24
-  simp at h24
-  rw [Nat.mod_eq_of_lt] at h24
-  rw [Nat.mod_eq_of_lt] at h24
-  rw [BVModEq.ZMod.eq_if_val] at h28
-  valify [h1_1, h2_1, h3_1] at h28
-  simp at h28
-  rw [Nat.mod_eq_of_lt] at h28
-  rw [Nat.mod_eq_of_lt] at h28
-  rw [BVModEq.ZMod.eq_if_val] at h32
-  valify [h1_1, h2_1, h3_1] at h32
-  simp at h32
-  rw [Nat.mod_eq_of_lt] at h32
-  rw [Nat.mod_eq_of_lt] at h32
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h4
-  bvify [h1_1, h2_1, h3_1] at h4
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h8
-  bvify [h1_1, h2_1, h3_1] at h8
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h12
-  bvify [h1_1, h2_1, h3_1] at h12
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h16
-  bvify [h1_1, h2_1, h3_1] at h16
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h20
-  bvify [h1_1, h2_1, h3_1] at h20
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h24
-  bvify [h1_1, h2_1, h3_1] at h24
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h28
-  bvify [h1_1, h2_1, h3_1] at h28
-  rw [BVModEq.BitVec_ofNat_eq_iff 256] at h32
-  bvify [h1_1, h2_1, h3_1] at h32
-  rw [BVModEq.ZMod.eq_if_val]
-  rw [BVModEq.ZMod.eq_if_val]
-  rw [BVModEq.ZMod.eq_if_val]
-  rw [BVModEq.ZMod.eq_if_val]
-  rw [BVModEq.ZMod.eq_if_val]
-  rw [BVModEq.ZMod.eq_if_val]
-  rw [BVModEq.ZMod.eq_if_val]
-  rw [BVModEq.ZMod.eq_if_val]
-  unfold BVModEq.bool_to_bv
-  unfold BVModEq.bool_to_bv at h4
-  unfold BVModEq.bool_to_bv at h8
-  unfold BVModEq.bool_to_bv at h12
-  unfold BVModEq.bool_to_bv at h16
-  unfold BVModEq.bool_to_bv at h20
-  unfold BVModEq.bool_to_bv at h24
-  unfold BVModEq.bool_to_bv at h28
-  unfold BVModEq.bool_to_bv at h32
-  valify [h1_1, h2_1, h3_1]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  rw [BVModEq.BitVec_ofNat_eq_iff 256]
-  bvify [h1_1, h2_1, h3_1]
+
+  translate_hypothesis h4
+  translate_hypothesis h8
+  translate_hypothesis h12
+  translate_hypothesis h16
+  translate_hypothesis h20
+  translate_hypothesis h24
+  translate_hypothesis h28
+  translate_hypothesis h32
+  translate_goal
   bv_decide
   try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1,
     h11_1, h12_1, h13_1, h14_1, h15_1, h16_1, h17_1, h18_1, h19_1, h20_1,

@@ -14,11 +14,85 @@ instance NotTwo: BVModEq.GtTwo (ff) := by
 
 set_option maxHeartbeats  20000000000000000000
 
-syntax (name := translateClause) "translate_clause" ppSpace (ident)? ("[" ident,* "]")? : tactic
 
-@[tactic translateClause]
+
+
+
+partial def countAnds (e : Expr) : Nat :=
+   match e with
+  | .const ``And _ =>
+      let args := e.getAppArgs
+      if h : args.size ≥ 2 then
+        let a := args[0]!
+        let b := args[1]!
+        1 + countAnds a + countAnds b
+      else
+        1
+  | _ =>
+      match e with
+      | .app f x => countAnds f + countAnds x
+      | _ => 0
+
+
+
+
+
+-- def evalRw (extractLemma : Name)
+--     (arg : Option (TSyntax `term))
+--     (hOpt : Option (TSyntax `ident)) : TacticM Unit := do
+--   -- make an identifier syntax for the lemma
+--   let lemmaTerm : TSyntax `term := mkIdent extractLemma
+
+--   -- build the term, with or without the extra argument
+
+
+--   let rule : TSyntax `Lean.Parser.Tactic.rwRule := ⟨lemmaTerm.raw⟩
+--   -- run the rewrite, with or without `at h`
+--   match hOpt with
+--   | some hIdent =>
+--       evalTactic (← `(tactic| rw [$rule] at $(mkIdent hIdent.getId):ident))
+--   | none =>
+--       evalTactic (← `(tactic| rw [$rule]))
+
+
+-- def evalSimp (extractLemma : Name) (hOpt : Option (TSyntax `ident)) : TacticM Unit := do
+--   match hOpt with
+--   | some hIdent => evalTactic (← `(tactic| simp [$(mkIdent extractLemma):ident] at $(mkIdent hIdent.getId):ident))
+--   | none        => evalTactic (← `(tactic| simp [$(mkIdent extractLemma):ident] ))
+
+
+-- def evalValify (args : Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+--                                         `Lean.Parser.Tactic.simpErase,
+--                                         `Lean.Parser.Tactic.simpLemma]))
+--     (hOpt : Option (TSyntax `ident)) : TacticM Unit := do
+--   if args.isEmpty then
+--     match hOpt with
+--     | some hIdent => evalTactic (← `(tactic| valify at  $(mkIdent hIdent.getId):ident))
+--     | none        => evalTactic (← `(tactic| valify))
+--   else
+--     match hOpt with
+--     | some hIdent => evalTactic (← `(tactic| valify [$[$args],*] at $(mkIdent hIdent.getId):ident))
+--     | none        => evalTactic (← `(tactic| valify [$[$args],*]))
+
+-- def evalBVify (args : Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+--                                         `Lean.Parser.Tactic.simpErase,
+--                                         `Lean.Parser.Tactic.simpLemma]))
+--     (hOpt : Option (TSyntax `ident)) : TacticM Unit := do
+--   if args.isEmpty then
+--     match hOpt with
+--     | some hIdent => evalTactic (← `(tactic| bvify at  $(mkIdent hIdent.getId):ident))
+--     | none        => evalTactic (← `(tactic| bvify))
+--   else
+--     match hOpt with
+--     | some hIdent => evalTactic (← `(tactic| bvify [$[$args],*] at $(mkIdent hIdent.getId):ident))
+--     | none        => evalTactic (← `(tactic| bvify [$[$args],*]))
+
+syntax (name := translateHypothesis) "translate_hypothesis" ppSpace ident ("[" ident,* "]")? : tactic
+
+
+@[tactic translateHypothesis]
 elab_rules : tactic
-| `(tactic| translate_clause $[ $h:ident ]? $[ [ $ids,* ] ]? ) => withMainContext do
+| `(tactic| translate_hypothesis $h:ident $[ [ $ids,* ] ]? ) => withMainContext do
   /- Build simpArg array (empty if none provided) -/
   let mut sargs :
     Array (TSyntax [`Lean.Parser.Tactic.simpStar,
@@ -32,32 +106,51 @@ elab_rules : tactic
                         `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
       sargs := sargs.push ua
 
-  /- Location (at h or goal) -/
-  let loc : TSyntax `location ←
-    match h with
-    | some hIdent =>
-        --let hyp : TSyntax `Lean.Parser.Tactic.locationHyp := ⟨hIdent.raw⟩
-        `(location| at  $(mkIdent hIdent.getId):ident)
-    | none =>
-        pure ⟨mkNullNode #[]⟩
-  let simpStx : TSyntax `tactic ←
-    match h with
-    | some hIdent =>
-      `(tactic| try simp at $(mkIdent hIdent.getId):ident)
-    | none        => `(tactic| try simp)
+  evalTactic (← `(tactic| simp [BVModEq.ZMod.eq_if_val] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| valify [$[$sargs],*] at $(mkIdent h.getId):ident) )
+  evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
+  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
 
 
-  /- Run rewrites & transformations -/
-  evalTactic (← `(tactic| rw [BVModEq.ZMod.eq_if_val] $loc))
-  evalTactic (← `(tactic| valify [$[$sargs],*] $loc; ))
-  evalTactic simpStx
-  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] $loc))
-  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] $loc))
-  evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256] $loc))
-  evalTactic (← `(tactic| bvify [$[$sargs],*] $loc))
 
-  logInfo m!"✅ translate_clause finished {if let some h := h then s!"for {h.getId}" else "on goal"}"
-  -- Step 1: check if there is a negative?
+
+
+
+syntax (name := translateGoal)
+  "translate_goal" ppSpace ("[" ident,* "]")? : tactic
+
+@[tactic translateGoal]
+elab_rules : tactic
+| `(tactic| translate_goal $[[ $ids,* ]]?) => withMainContext do
+  /- Build simpArg array (empty if none provided) -/
+  let mut sargs :
+    Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+                    `Lean.Parser.Tactic.simpErase,
+                    `Lean.Parser.Tactic.simpLemma]) := #[]
+  if let some idList := ids then
+    for i in idList.getElems do
+      let sa ← `(simpArg| $i:term)
+      let ua : TSyntax [`Lean.Parser.Tactic.simpStar,
+                        `Lean.Parser.Tactic.simpErase,
+                        `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
+      sargs := sargs.push ua
+
+  evalTactic (← `(tactic| simp [BVModEq.ZMod.eq_if_val]))
+  evalTactic (← `(tactic| valify [$[$sargs],*] ) )
+  evalTactic (← `(tactic| try simp ) )
+  --evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
+  --evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] ))
+  evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
+  evalTactic (← `(tactic| bvify [$[$sargs],*]))
+  let g ← getMainGoal
+  let t ← g.getType
+  let n := countAnds t
+  for _ in [:n] do
+      evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
+  evalTactic (← `(tactic| bvify [$[$sargs],*]))
 
 
 
@@ -176,38 +269,36 @@ lemma correct :
     rcases h48 with ⟨h48_1, h48_2⟩
     unfold BVModEq.map_bv_to_f at hsum
     --simp at hsum
-    translate_clause hsum
-
-
-
-    -- rw [BVModEq.ZMod.eq_if_val] at hsum
-    -- valify [h1_1, h2_1, h3_1, h4_1] at hsum
-    -- simp at hsum
+    translate_hypothesis hsum
     -- rw [Nat.mod_eq_of_lt] at hsum
+    -- rw [Nat.mod_eq_of_lt] at hsum
+
+
+
     -- rw [Nat.mod_eq_of_lt] at hsum
       --rw [BVModEq.ZMod.if_then_else_val]
       --have h: ZMod.val (if (a * b)[0] = true then (1:f) else 0) = if (a * b)[0] = true then (1:f).val else (0:f).val := by sorry
       --rw [h]
-
     unfold BVModEq.bool_to_bv
-    simp
-    rw [BVModEq.ZMod.eq_if_val]
-    --simp [apply_ite]
-    simp [BVModEq.ZMod.eq_if_val]
-    valify [h1_1, h2_1, h3_1, h4_1]
+    -- --simp
+    --simp [BVModEq.ZMod.eq_if_val]
+    translate_goal
+    -- -- rw [BVModEq.ZMod.eq_if_val]
+    -- -- --simp [apply_ite]
+    -- simp [BVModEq.ZMod.eq_if_val]
+    -- valify [h1_1, h2_1, h3_1, h4_1]
 
-    --valify [h1_1, h2_1, h3_1,h4_1]
-    --rw [ BVModEq.BitVec_ofNat_eq_iff 256] at hsum
-    --bvify [h1_1, h2_1, h3_1, h4_1] at hsum
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    rw [ BVModEq.BitVec_ofNat_eq_iff 256]
-    bvify [h1_1, h2_1, h3_1, h4_1]
+    -- --valify [h1_1, h2_1, h3_1,h4_1]
+    -- --rw [ BVModEq.BitVec_ofNat_eq_iff 256] at hsum
+    -- --bvify [h1_1, h2_1, h3_1, h4_1] at hsum
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
+    -- rw [ BVModEq.BitVec_ofNat_eq_iff 256]
     bv_decide (config := {timeout := 300})
     try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1,
     h11_1, h12_1, h13_1, h14_1, h15_1, h16_1, h17_1, h18_1, h19_1, h20_1,
