@@ -24,10 +24,16 @@ def map_bv_to_f {bw} (n: ℕ) (b : BitVec bw) : ZMod n :=
 
 def map_f_to_bv_circ {ff : ℕ} n (rs1_val : ZMod ff) : BitVec n :=
   let m : ℕ := ZMod.val rs1_val
-  if m < 2^n then
+  if m <= 2^n then
     BitVec.ofNat n m
   else
     BitVec.ofNat n 0
+
+lemma map_f_to_bv_circ_spec {ff n : ℕ} (rs1_val : ZMod ff)
+  (h : ZMod.val rs1_val <= 2^n) :
+  map_f_to_bv_circ n rs1_val = BitVec.ofNat n (ZMod.val rs1_val) := by
+  simp [map_f_to_bv_circ]
+  simp [h]
 
 def map_f_to_bv {ff : ℕ} n (rs1_val : ZMod ff) : Option (BitVec n) :=
   let m : ℕ := ZMod.val rs1_val

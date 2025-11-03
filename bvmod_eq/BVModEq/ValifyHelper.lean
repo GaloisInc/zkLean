@@ -117,13 +117,13 @@ syntax (name := findInsideVal) "findInsideVal" (ppSpace "=>" ident)? : tactic
 set_option maxHeartbeats  20000000000000000000
 
 lemma ZMod.val_sub_mod {ff: ℕ} [h: NeZero ff] {y x : ZMod ff}  (h : x.val ≤ y.val)
-  : (y - x).val = (y.val - x.val) % ff := by
+  : (y - x).val = (y.val - x.val) := by
   have hx:= ZMod.val_lt x
   have hy := ZMod.val_lt y
   rw [ZMod.val_sub]
-  rw [Nat.mod_eq_of_lt]
-  have h1 : y.val - x.val ≤ y.val := Nat.sub_le y.val x.val
-  apply lt_of_le_of_lt h1 hy
+  --rw [Nat.mod_eq_of_lt]
+  -- have h1 : y.val - x.val ≤ y.val := Nat.sub_le y.val x.val
+  -- apply lt_of_le_of_lt h1 hy
   apply h
 
 
@@ -262,6 +262,8 @@ example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[
   rw [ZMod.val_sub_mod]
   all_goals valify [h1,h2,h3]
   try_apply_lemma_hyps [h1, h2, h3]
+
+
 
 
 

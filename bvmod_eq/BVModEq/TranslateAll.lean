@@ -21,6 +21,19 @@ namespace BVModEq
 
 syntax (name := translateHypothesis) "translate_hypothesis" ppSpace ident ("[" ident,* "]")? : tactic
 
+lemma neg_add_to_sub {α : Type*} [AddCommGroup α] (a b : α) :
+  -a + b = b - a := by
+  rw [sub_eq_add_neg]
+  rw [add_comm (-a) b]
+
+lemma sub_add_right_recursive {α : Type*} [AddCommGroup α]
+    (a b c : α) : a - b + c = (a + c) - b := by
+  rw [sub_eq_add_neg, add_assoc]
+  rw [sub_eq_add_neg]
+  rw [add_comm (-b) (c)]
+  rw [add_assoc]
+
+
 
 @[tactic translateHypothesis]
 elab_rules : tactic
@@ -39,13 +52,34 @@ elab_rules : tactic
       sargs := sargs.push ua
   evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try unfold BVModEq.map_bv_to_f  at $(mkIdent h.getId):ident))
-  evalTactic (← `(tactic| simp [BVModEq.ZMod.eq_if_val] at $(mkIdent h.getId):ident))
-  evalTactic (← `(tactic| valify [$[$sargs],*] at $(mkIdent h.getId):ident) )
+  evalTactic (← `(tactic| try simp [BVModEq.ZMod.eq_if_val] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try valify [$[$sargs],*] at $(mkIdent h.getId):ident) )
   evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
-  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
-  evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
-  evalTactic (← `(tactic| bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
+
+
+partial def countMinuses (e : Expr) : Nat :=
+  match e.getAppFn.constName? with
+  | some n =>
+    if n == ``HSub.hSub || n == ``Sub.sub then
+      let args := e.getAppArgs
+      if h : args.size ≥ 2 then
+        let a := args[0]!
+        let b := args[1]!
+        1 + countMinuses a + countMinuses b
+      else
+        1
+    else
+      match e with
+      | .app f x => countMinuses f + countMinuses x
+      | _ => 0
+  | none =>
+      match e with
+      | .app f x => countMinuses f + countMinuses x
+      | _ => 0
 
 
 partial def countAnds (e : Expr) : Nat :=
@@ -85,18 +119,30 @@ elab_rules : tactic
       sargs := sargs.push ua
   evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv ))
   evalTactic (← `(tactic| try unfold BVModEq.map_bv_to_f  ))
-  evalTactic (← `(tactic| simp [BVModEq.ZMod.eq_if_val]))
-  evalTactic (← `(tactic| valify [$[$sargs],*] ) )
+  evalTactic (← `(tactic| try simp [BVModEq.ZMod.eq_if_val]))
+  evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
   evalTactic (← `(tactic| try simp ) )
-
-  evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
-  evalTactic (← `(tactic| bvify [$[$sargs],*]))
   let g ← getMainGoal
   let t ← g.getType
+  let i := countMinuses t
+  -- this currently counts 1-x which it should not
+  if i > 0 then
+     evalTactic (← `(tactic|  try rw [<- sub_eq_add_neg]))
+     evalTactic (← `(tactic|  try rw [sub_add_right_recursive]))
+    for _ in [:i] do
+       evalTactic (← `(tactic|  rw [BVModEq.ZMod.val_sub_mod]))
+       evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
+       evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
+    evalTactic (← `(tactic| try simp))
+  evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
+  evalTactic (← `(tactic| try bvify [$[$sargs],*]))
+  if i > 0 then
+    evalTactic (← `(tactic|  rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub]))
+    evalTactic (← `(tactic| try bvify [$[$sargs],*] ) )
   let n := countAnds t
   for _ in [:n] do
       evalTactic (← `(tactic| rw [BVModEq.BitVec_ofNat_eq_iff 256]))
-  evalTactic (← `(tactic| bvify [$[$sargs],*]))
+  evalTactic (← `(tactic| try bvify [$[$sargs],*]))
 
 def isZModIdemEq (e : Expr) : Option Expr :=
   match e with
@@ -197,16 +243,23 @@ elab_rules : tactic
                         `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
       sargs := sargs.push ua
 
+  evalTactic (← `(tactic| try simp))
+  let gs ← getGoals
+  if gs.isEmpty then
+    logInfo "✅ No goals left!"
+    return
 
   let name := Name.mkSimple s!"h"
-
-  let g ← getMainGoal
-  let (fvarId, newGoal) ← g.intro `h
-  setGoals [newGoal]
-  let hIdent : TSyntax `ident := mkIdent `h
-  let leaves ← flattenAnds hIdent
-
-  let collected ← smartTranslateMany leaves sargs
+  let collected ←
+  try
+    let g ← getMainGoal
+    let (fvarId, newGoal) ← g.intro `h
+    setGoals [newGoal]
+    let hIdent : TSyntax `ident := mkIdent `h
+    let leaves ← flattenAnds hIdent
+    smartTranslateMany leaves sargs
+  catch _ =>
+    pure #[]
 
 
   evalTactic (← `(tactic| translate_goal))
