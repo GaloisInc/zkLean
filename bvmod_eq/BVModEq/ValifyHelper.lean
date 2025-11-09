@@ -228,40 +228,40 @@ elab_rules : tactic
 
 -- TODO: get range analysis to ignore goals with % or apply Nat.mod_eq.of_lt if they have them ( FRIDAY! )
 
-lemma hello {b a : BitVec 2}   :  ( (BVModEq.map_bv_to_f ff a ) *(BVModEq.map_bv_to_f ff b + 3 - BVModEq.map_bv_to_f ff a)).val <= 200 := by
+-- lemma hello {b a : BitVec 2}   :  ( (BVModEq.map_bv_to_f ff a ) *(BVModEq.map_bv_to_f ff b + 3 - BVModEq.map_bv_to_f ff a)).val <= 200 := by
 
 
--- + BVModEq.map_bv_to_f ff a * BVModEq.map_bv_to_f ff b ).val  = 10  := by
-  unfold BVModEq.map_bv_to_f
-  have ha : a.toNat ≤ 2 ^ 2 - 1 := BitVec.toNatLT
-  valify [ha]
-  simp
-  rw [ZMod.val_sub_mod]
-  all_goals valify [ha]
-  try_apply_lemma_hyps []
-
-
-
-
-
-example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[2].val <= 1 ) -> ( (1: ZMod ff) - ( (fv[0]*fv[1]) + (1-fv[0])*( 1 -fv[1]))).val < 7 := by
-  intro h1 h2 h3
-  valify [h1, h2, h3]
-  rw [ZMod.val_sub_mod]
-  all_goals valify [h1,h2,h3]
-  try_apply_lemma_hyps [h1, h2, h3]
-  ---try_apply_lemma_hyps [h1, h2, h3]
+-- -- + BVModEq.map_bv_to_f ff a * BVModEq.map_bv_to_f ff b ).val  = 10  := by
+--   unfold BVModEq.map_bv_to_f
+--   have ha : a.toNat ≤ 2 ^ 2 - 1 := BitVec.toNatLT
+--   valify [ha]
+--   simp
+--   rw [ZMod.val_sub_mod]
+--   all_goals valify [ha]
+--   try_apply_lemma_hyps []
 
 
 
 
 
-example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[2].val <= 1 ) ->  ( ( fv[0] + fv[1]) - (fv[0]*fv[1])).val < 7 := by
-  intro h1 h2 h3
-  --valify [h1, h2, h3]
-  rw [ZMod.val_sub_mod]
-  all_goals valify [h1,h2,h3]
-  try_apply_lemma_hyps [h1, h2, h3]
+-- example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[2].val <= 1 ) -> ( (1: ZMod ff) - ( (fv[0]*fv[1]) + (1-fv[0])*( 1 -fv[1]))).val < 7 := by
+--   intro h1 h2 h3
+--   valify [h1, h2, h3]
+--   rw [ZMod.val_sub_mod]
+--   all_goals valify [h1,h2,h3]
+--   try_apply_lemma_hyps [h1, h2, h3]
+--   ---try_apply_lemma_hyps [h1, h2, h3]
+
+
+
+
+
+-- example (fv : Vector (ZMod ff) 8): (fv[0].val <= 1) -> (fv[1].val <= 1 ) -> (fv[2].val <= 1 ) ->  ( ( fv[0] + fv[1]) - (fv[0]*fv[1])).val < 7 := by
+--   intro h1 h2 h3
+--   --valify [h1, h2, h3]
+--   rw [ZMod.val_sub_mod]
+--   all_goals valify [h1,h2,h3]
+--   try_apply_lemma_hyps [h1, h2, h3]
 
 
 

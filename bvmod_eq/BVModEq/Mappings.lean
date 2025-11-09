@@ -22,7 +22,7 @@ def map_bv_to_f {bw} (n: ℕ) (b : BitVec bw) : ZMod n :=
   (b.toNat : ZMod n)
 
 
-def map_f_to_bv_circ {ff : ℕ} n (rs1_val : ZMod ff) : BitVec n :=
+def map_f_to_bv_circ {ff : ℕ} (n: ℕ)  (rs1_val : ZMod ff) : BitVec n :=
   let m : ℕ := ZMod.val rs1_val
   if m <= 2^n then
     BitVec.ofNat n m
