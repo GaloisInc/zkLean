@@ -164,7 +164,7 @@ elab_rules : tactic
     let some decl := lctx.findFromUserName? h.getId
       | throwError m!"No hypothesis named {h.getId}"
     countMinusOps2 decl.type
-  logInfo m! "MINUSES HIP {i}"
+  --logInfo m! "MINUSES HIP {i}"
 
   -- TO DO THIS SHOULD BE A TRY CATCH LOOP!
   evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv at $(mkIdent h.getId):ident))
@@ -385,7 +385,7 @@ def smartTranslateOne
                         (varToHypRef : IO.Ref (Std.HashMap FVarId (TSyntax `ident))): TacticM (Option (TSyntax `ident)) := do
     withMainContext do
     -- Retrieve hypothesis declaration safely
-    logInfo m!"here?"
+
     let lctx ← getLCtx
     let some decl := lctx.findFromUserName? h.getId
       | throwError m!"no hypothesis `{h.getId}` in local context"
@@ -407,8 +407,8 @@ def smartTranslateOne
          match getVarEq hType with
           | some rhsVarId => do
                --logInfo m! "We are here!!!"
-              --try
-                logInfo m! "{h}"
+              try
+
                 evalTactic (← `(tactic| rw [duplicate] at $(mkIdent h.getId):ident))
 
                 let newName := mkIdent (Name.mkSimple s!"{h.getId}_new")
@@ -423,7 +423,7 @@ def smartTranslateOne
 
                 varToHypRef.modify fun m =>
                     m.insert rhsVarId newName
-              --catch _ => logInfo m! "We are here :( "
+              catch _ => pure ()
            | _ => pure ()
 
 
@@ -449,9 +449,9 @@ def smartTranslateMany
                       `Lean.Parser.Tactic.simpLemma]))
     (varToHypRef : IO.Ref (Std.HashMap FVarId (TSyntax `ident))) : TacticM (Array (TSyntax `ident)) := do
   let mut picked : Array (TSyntax `ident) := #[]
-  logInfo m! "ARRAY {hs}"
+
   for h in hs do
-    logInfo m! "{h}"
+
     if let some k ← smartTranslateOne h extraArgs varToHypRef then
       picked := picked.push k
   return picked
