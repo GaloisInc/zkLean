@@ -10,6 +10,12 @@ import Mathlib.Tactic.Linarith
 
 namespace BVModEq
 
+def smtSignExtend (k : Nat) {w} (a : BitVec w) : BitVec (w + k) :=
+  BitVec.signExtend (w + k) a
+
+def smtZeroExtend (k : Nat) {w} (a : BitVec w) : BitVec (w + k) :=
+  BitVec.zeroExtend (w + k) a
+
 class GtTwo (n : ℕ) : Prop where
   out : 2 < n
 

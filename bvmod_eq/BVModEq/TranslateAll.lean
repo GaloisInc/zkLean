@@ -264,8 +264,11 @@ elab_rules : tactic
                         `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
       sargs := sargs.push ua
   --logInfo m! "Minuses {i}"
+  logInfo m!"here???"
   evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv ))
   evalTactic (← `(tactic| try unfold BVModEq.map_bv_to_f  ))
+  evalTactic (← `(tactic| try unfold BVModEq.smtSignExtend ))
+  evalTactic (← `(tactic| try unfold BVModEq.smtZeroExtend  ))
   evalTactic (← `(tactic| try rw [map_f_to_bv_circ_spec] ))
   let mut subLoop := true
     while (subLoop) do
@@ -273,10 +276,11 @@ elab_rules : tactic
       evalTactic (← `(tactic| all_goals rw [<- sub_eq_add_neg]))
     catch _ =>
       subLoop := false
+  logInfo m!"here"
   let mut g ← getMainGoal
   let mut t ← g.getType
-  if isExists t then
-       evalTactic (← `(tactic| refine ?_))
+  -- if isExists t then
+  --      evalTactic (← `(tactic| refine ?_))
   let i  ←  countMinusOps2 t
 
   --TO DO THIS SHOULD BE A TRY CATCH LOOP!
@@ -291,6 +295,9 @@ elab_rules : tactic
   evalTactic (← `(tactic| try rw [<- sub_eq_add_neg]))
   evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
   evalTactic (← `(tactic| try simp ) )
+  let goals <- getGoals
+  if goals.isEmpty then
+    return
 
   if i > 0 then
     --  evalTactic (← `(tactic|  try rw [<- sub_eq_add_neg]))
@@ -514,13 +521,18 @@ elab_rules : tactic
   -- catch _ =>
   --logInfo m! "No hyps?"
   --   pure #[]
-
-
+  let mut after ← getGoals
+  if after.isEmpty then
+    return
   evalTactic (← `(tactic| translate_goal))
+
+  after ← getGoals
+  if after.isEmpty then
+    return
   evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
 
   evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
-  let mut after ← getGoals
+  after ← getGoals
 
   if !after.isEmpty then
     while (!after.isEmpty) do
@@ -561,6 +573,7 @@ elab_rules : tactic
             | some hypExpr =>
               logInfo m! "{hypExpr}"
               evalTactic (← `(tactic| simp [← $hypExpr] at *))
+              after ← getGoals
             | none =>
                 break
 
@@ -577,17 +590,22 @@ elab_rules : tactic
 
 
 
-abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
-instance : Fact (Nat.Prime ffff0) := by sorry
-instance : Fact (NeZero ffff0) := by sorry
-instance Notwo: BVModEq.GtTwo (ffff0) := by sorry
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance Notwo: BVModEq.GtTwo (ffff0) := by sorry
+-- variable (a : BitVec 7)
+-- lemma correct :
+-- ((((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend  1 a)[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend 1 a)[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend 1 a)[2]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[2]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend 1 a)[3]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[3]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend 1 a)[4]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[4]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend 1 a)[5]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[5]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend 1 a)[6]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[6]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BVModEq.smtSignExtend 1 a)[7]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (if (((BVModEq.bool_to_bv 1 a[6]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))
+--  := by translate_all
 
-abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
-variable (b : BitVec 1)
-variable (a : BitVec 1)
 
+  --translate_all
+  --bv_decide
 
-
+-- RQ
+-- variable (a : BitVec 7)
+-- (BitVec.signExtend 1 a )[1] == 1#1 --> false always why?
 
 
 -- EXISTS PROBLEM
