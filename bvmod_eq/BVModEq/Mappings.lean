@@ -16,6 +16,9 @@ def smtSignExtend (k : Nat) {w} (a : BitVec w) : BitVec (w + k) :=
 def smtZeroExtend (k : Nat) {w} (a : BitVec w) : BitVec (w + k) :=
   BitVec.zeroExtend (w + k) a
 
+def BitVec.mod (a b : BitVec w) : BitVec w :=
+  a % b
+
 class GtTwo (n : ℕ) : Prop where
   out : 2 < n
 
