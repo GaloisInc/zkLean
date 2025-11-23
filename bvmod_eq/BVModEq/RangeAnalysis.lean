@@ -435,9 +435,10 @@ def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
   try
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
-  catch e => do
-    logInfo m!"WHY{stx}" --pure ()
-    logInfo (Lean.Exception.toMessageData e)
+  catch _ =>
+    pure ()
+    --logInfo m!"WHY{stx}" --pure ()
+    --logInfo (Lean.Exception.toMessageData e)
 
 def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (hyps : List Name)
   : ContT LoopBodyResult TacticM Unit := do
@@ -967,7 +968,10 @@ elab_rules : tactic
 --  apply Nat.add_le_add
 --  apply Nat.le_refl  -- rfl
 --  apply Nat.le_trans --expLeq
+set_option maxHeartbeats  20000000000000000000
 
+-- example : 0<= 2 :=by
+--   try_apply_lemma_hyps []
 -- TODO THIS SHOULD WORK WITH == 1
 -- example {a b : BitVec 1} : ((if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[0] = true then 1 else 0) +
 --     if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[1] = true then 2 else 0) <
