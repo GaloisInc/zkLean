@@ -847,7 +847,7 @@ elab_rules : tactic
        evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
 
 
-  logInfo m! "Collected {collected}"
+  --logInfo m! "Collected {collected}"
   evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
   after ← getGoals
 
@@ -894,7 +894,7 @@ elab_rules : tactic
             | none =>
                 break
 
--- --ISSUES WITH RANGE ANALYSIS
+--ISSUES WITH RANGE ANALYSIS
 -- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 -- instance : Fact (Nat.Prime ffff0) := by sorry
 -- instance : Fact (NeZero ffff0) := by sorry

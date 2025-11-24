@@ -440,7 +440,6 @@ def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyR
 
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (stx : Syntax)
   : ContT LoopBodyResult TacticM Unit := do
-  logInfo m!"{stx}"
   try
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
@@ -697,7 +696,7 @@ elab_rules : tactic
         updatedGoalsReversed := g :: updatedGoalsReversed
         continue
       setGoals [g] -- focus on one goal at a time
-      logInfo m! "GOAL {g}"
+      --logInfo m! "GOAL {g}"
       let goalType ← g.getType
       -- first we try to apply hypothesis
       let instantiatedGoalType ← instantiateMVars goalType
@@ -711,7 +710,7 @@ elab_rules : tactic
           if i == 0 then
             evalTactic (← `(tactic| valify [$sargs,*]))
              let gs <- getMainGoal
-            logInfo m! "We did something? {g}"
+            --logInfo m! "We did something? {g}"
           for _ in [:i] do
               evalTactic (← `(tactic| rw [ZMod.val_sub_mod]))
               evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
@@ -1117,21 +1116,21 @@ elab_rules : tactic
 -- h1_new : (if bool_to_bv 1 a[1] = 1#1 then 1 else 0) = x_bit1
 -- h1 : (if a[1] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit1)
 -- ⊢ ZMod.val x_bit0 + ZMod.val x_bit1 * 2 < 52435875175126190479447740508185965837690552500527637822603658699938581184513
-abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
-instance : Fact (Nat.Prime ffff0) := by sorry
-instance : Fact (NeZero ffff0) := by sorry
-instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
 
-abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
-variable (a : BitVec 2)
-variable (x_bit1 : FF0)
-variable (x_bit0 : FF0)
-lemma correct
-(a : BitVec 2)
-(x_bit1 x_bit0 : FF0)
-(h0_new :  (if (if a[0] = true then 1#1 else 0#1) = 1#1 then 1 else 0) = x_bit0)
-(h0 : (if a[0] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit0))
-(h1_new : (if (if a[1] = true then 1#1 else 0#1) = 1#1 then 1 else 0) = x_bit1)
-(h1 : (if a[1] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit1)) :
-ZMod.val x_bit0 + ZMod.val x_bit1  * 2 < 52435875175126190479447740508185965837690552500527637822603658699938581184513 := by
-try_apply_lemma_hyps [h0_new, h1_new]
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- variable (a : BitVec 2)
+-- variable (x_bit1 : FF0)
+-- variable (x_bit0 : FF0)
+-- lemma correct
+-- (a : BitVec 2)
+-- (x_bit1 x_bit0 : FF0)
+-- (h0_new :  (if (if a[0] = true then 1#1 else 0#1) = 1#1 then 1 else 0) = x_bit0)
+-- (h0 : (if a[0] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit0))
+-- (h1_new : (if (if a[1] = true then 1#1 else 0#1) = 1#1 then 1 else 0) = x_bit1)
+-- (h1 : (if a[1] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit1)) :
+-- ZMod.val x_bit0 + ZMod.val x_bit1  * 2 < 52435875175126190479447740508185965837690552500527637822603658699938581184513 := by
+-- try_apply_lemma_hyps [h0_new, h1_new]
