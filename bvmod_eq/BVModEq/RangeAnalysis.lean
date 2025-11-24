@@ -116,7 +116,7 @@ def isArithmeticHead (e : Expr) : Bool :=
       n == ``HSub.hSub || n == ``Sub.sub ||
       n == ``HMul.hMul || n == ``Mul.mul ||
       n == ``Neg.neg   || n == ``HMod.hMod ||
-      n == ``HPow.hPow || n == ``Pow.pow
+      n == ``HPow.hPow || n == ``Pow.pow || n == ``ite
   | none => false
 
 private def compositeInsideValHere? (e : Expr) : MetaM ( Bool) := do
@@ -463,7 +463,74 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
       -- Note: `return` below makes sure we end the loop after jumping to the
       -- continuation
       return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
-    catch _err => pure ()
+      catch _err => pure ()
+    try
+    --   let ok ← monadLift <| g.withContext do
+    --     let lctx ← getLCtx
+    --     return (lctx.findFromUserName? hName).isSome
+
+    --   if !ok then
+    --     pure ()
+    --   else
+    --     -- This is the key: use the NAME, not exprToSyntax
+    --     let hId : TSyntax `term := Lean.mkIdent hName
+
+    --     -- Run simp [← hName]
+    --      monadLift $ do evalTactic (← `(tactic| simp [← $hId] ))
+    -- catch _ => pure ()
+
+    -- let subgoals ← getGoals
+      let hypSyn <- monadLift $ g.withContext do
+        let lctx1 ← getLCtx
+        let some decl := lctx1.findFromUserName? hName
+          | throwError m!"❌ Could not find a hypothesis named `{hName}`"
+        --return decl
+        let hypExpr : Expr := mkFVar decl.fvarId
+        let hypSyn ←  Lean.Elab.Term.exprToSyntax hypExpr
+        return hypSyn
+        --return (hypSyn)
+      --monadLift $ do evalTactic (← `(tactic| try rw [BVModEq.bool_to_bv] at $hypSyn))
+      monadLift $ do evalTactic  (← `(tactic| simp [← $hypSyn] ))
+      let subgoals ← getGoals
+      return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
+
+    catch _ => pure ()
+
+
+        -- Convert to syntax (safe version)
+        -- let hypSyn? ← monadLift <| Lean.Elab.Term.exprToSyntax? hypExpr
+        -- match hypSyn? with
+        -- | none =>
+        --     logInfo "exprToSyntax failed"
+        --     pure ()
+        -- | some hypSyn => do
+        --     -- Try simp
+        --     monadLift $ evalTactic (← `(tactic| simp [← $hypSyn] ))
+
+        -- Update goals and return to loop continuation
+
+            --match lctx.findFromUserName? h with
+
+  --       | none =>
+  --           --logInfo m!"Variable {onlyName} not found in context"
+  --           break
+  --       | some decl =>
+  --           let fvarId := decl.fvarId
+
+  --           let varMap ← varToHypRef.get
+
+  --           match lookup varMap fvarId with
+  --           | some hypExpr =>
+  --             --logInfo m! "{hypExpr}"
+  --             evalTactic (← `(tactic| simp [← $hypExpr] at *))
+  --             after ← getGoals
+  --           | none =>
+  --               break
+
+      -- catch _err =>
+      --  logInfo m! "Error: {(_err.toMessageData)}"
+      --  pure ()
+  logInfo m! "How did we get here?"
   let lt ← monadLift (m := TacticM) ``(ZMod.toNatLT)
   let applyThisLemma := applyThisLemma loopBodyReturn g goalType leftSide
   applyThisLemma lt
@@ -631,18 +698,6 @@ elab_rules : tactic
         continue
       setGoals [g] -- focus on one goal at a time
       logInfo m! "GOAL {g}"
-      --let k <- instantiateMVars ty
-      -- if bothArgsAreApps k then
-      --   logInfo m! "WE MADE IT {k}"
-      --   try
-      --     evalTactic (← `(tactic| simp))
-      --     g <- getMainGoal
-      --     if (← g.isAssigned) then
-      --       updatedGoalsReversed := g :: updatedGoalsReversed
-      --       continue
-      --     setGoals [g]
-      --   catch _ => pure ()
-
       let goalType ← g.getType
       -- first we try to apply hypothesis
       let instantiatedGoalType ← instantiateMVars goalType
@@ -651,9 +706,12 @@ elab_rules : tactic
       let i := countMinusOps instantiatedGoalType
      -- logInfo m!"MINUSUS{i}"
       if (<- firstCompositeInsideVal? instantiatedGoalType) then do
+        --logInfo m! "Composite!"
         try
           if i == 0 then
             evalTactic (← `(tactic| valify [$sargs,*]))
+             let gs <- getMainGoal
+            logInfo m! "We did something? {g}"
           for _ in [:i] do
               evalTactic (← `(tactic| rw [ZMod.val_sub_mod]))
               evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
@@ -666,34 +724,33 @@ elab_rules : tactic
           continue
               --evalTactic (← `(tactic| nth_rewrite 2 [Nat.mod_eq_of_lt]))
           catch  _ =>
-            handled :=true
+            handled := true
             progress := false
             let gs <- getGoals
             updatedGoalsReversed := gs ++ updatedGoalsReversed
             --logInfo m! "FAILED"
             continue
       else
-
-      if isBitVecType instantiatedGoalType then do
-        try
-          if i == 0 then
-            evalTactic (← `(tactic| bvify [$sargs,*]))
-          for _ in [:i] do
-              evalTactic (← `(tactic|  rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub]))
-              evalTactic (← `(tactic| try bvify [$[$sargs],*] ) )
-          let gs <- getGoals
-          updatedGoalsReversed := gs ++ updatedGoalsReversed
-          progress := true
-          handled := true
-          continue
-              --evalTactic (← `(tactic| nth_rewrite 2 [Nat.mod_eq_of_lt]))
-          catch  _ =>
-            handled :=true
-            progress := false
+        if isBitVecType instantiatedGoalType then do
+          try
+            if i == 0 then
+              evalTactic (← `(tactic| bvify [$sargs,*]))
+            for _ in [:i] do
+                evalTactic (← `(tactic|  rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub]))
+                evalTactic (← `(tactic| try bvify [$[$sargs],*] ) )
             let gs <- getGoals
             updatedGoalsReversed := gs ++ updatedGoalsReversed
-            --logInfo m! "FAILED"
+            progress := true
+            handled := true
             continue
+                --evalTactic (← `(tactic| nth_rewrite 2 [Nat.mod_eq_of_lt]))
+            catch  _ =>
+              handled :=true
+              progress := false
+              let gs <- getGoals
+              updatedGoalsReversed := gs ++ updatedGoalsReversed
+              --logInfo m! "FAILED"
+              continue
       if exprHasMod instantiatedGoalType then do
         let mut modLoop:= true
        -- logInfo m! "The issue is here?\n {goalType}"
@@ -1060,3 +1117,21 @@ elab_rules : tactic
 -- h1_new : (if bool_to_bv 1 a[1] = 1#1 then 1 else 0) = x_bit1
 -- h1 : (if a[1] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit1)
 -- ⊢ ZMod.val x_bit0 + ZMod.val x_bit1 * 2 < 52435875175126190479447740508185965837690552500527637822603658699938581184513
+abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+instance : Fact (Nat.Prime ffff0) := by sorry
+instance : Fact (NeZero ffff0) := by sorry
+instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+variable (a : BitVec 2)
+variable (x_bit1 : FF0)
+variable (x_bit0 : FF0)
+lemma correct
+(a : BitVec 2)
+(x_bit1 x_bit0 : FF0)
+(h0_new :  (if (if a[0] = true then 1#1 else 0#1) = 1#1 then 1 else 0) = x_bit0)
+(h0 : (if a[0] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit0))
+(h1_new : (if (if a[1] = true then 1#1 else 0#1) = 1#1 then 1 else 0) = x_bit1)
+(h1 : (if a[1] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit1)) :
+ZMod.val x_bit0 + ZMod.val x_bit1  * 2 < 52435875175126190479447740508185965837690552500527637822603658699938581184513 := by
+try_apply_lemma_hyps [h0_new, h1_new]

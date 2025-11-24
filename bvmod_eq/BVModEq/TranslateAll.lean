@@ -678,7 +678,7 @@ def smartTranslateOne
       Array (TSyntax [`Lean.Parser.Tactic.simpStar,
                       `Lean.Parser.Tactic.simpErase,
                       `Lean.Parser.Tactic.simpLemma]))
-                        (varToHypRef : IO.Ref (Std.HashMap FVarId (TSyntax `ident))): TacticM (Option (TSyntax `ident)) := do
+                        (varToHypRef : IO.Ref (Std.HashMap FVarId (TSyntax `ident))): TacticM ( Option (TSyntax `ident) × Option (TSyntax `ident)) := do
     withMainContext do
     -- Retrieve hypothesis declaration safely
 
@@ -698,7 +698,7 @@ def smartTranslateOne
         let h1 := mkIdent (Name.mkSimple s!"{h.getId}_1")
         let h2 := mkIdent (Name.mkSimple s!"{h.getId}_2")
         evalTactic (← `(tactic| rcases $(mkIdent h.getId):ident  with ⟨$h1, $h2⟩))
-        return some h1
+        return (some h1, none)
     | none =>
          match getVarEq hType with
           | some rhsVarId => do
@@ -712,6 +712,8 @@ def smartTranslateOne
                 evalTactic (← `(tactic|
                   rcases $(mkIdent h.getId):ident with ⟨$(mkIdent h.getId):ident, $newName⟩))
 
+                evalTactic (← `(tactic| try rw [BVModEq.bool_to_bv] at $(mkIdent newName.getId):ident))
+
 
                 --evalTactic (← `(tactic| translate_hypothesis $h))
 
@@ -721,16 +723,17 @@ def smartTranslateOne
                   pure ()
                 else
                   varToHypRef.modify fun m => m.insert rhsVarId newName
+                  -- if extraArgs.isEmpty then
+                  --   evalTactic (← `(tactic| translate_hypothesis $h))
+
+                  -- else
+                  --   evalTactic (← `(tactic| translate_hypothesis $h [$$extraArgs,*]))
+                  return (some newName ,some h)
               catch _ => pure ()
            | _ => pure ()
 
 
-        if extraArgs.isEmpty then
-          evalTactic (← `(tactic| translate_hypothesis $h))
-        else
-          evalTactic (← `(tactic| translate_hypothesis $h [$$extraArgs,*]))
-      --logInfo m! "Done"
-        return none
+       return (none, some h)
 
 
 def lookup (m : Std.HashMap FVarId (TSyntax `ident)) (id : FVarId) : Option (TSyntax `ident):=
@@ -747,11 +750,27 @@ def smartTranslateMany
                       `Lean.Parser.Tactic.simpLemma]))
     (varToHypRef : IO.Ref (Std.HashMap FVarId (TSyntax `ident))) : TacticM (Array (TSyntax `ident)) := do
   let mut picked : Array (TSyntax `ident) := #[]
+  let mut translate : Array (TSyntax `ident) := #[]
 
   for h in hs do
 
-    if let some k ← smartTranslateOne h extraArgs varToHypRef then
-      picked := picked.push k
+   let (k?, w?) ← smartTranslateOne h extraArgs varToHypRef
+
+-- If we got a k, push it
+    match k? with
+    | some k => picked := picked.push k
+    | none   => pure ()
+
+    -- If we got a w, translate the hypothesis
+    match w? with
+    | some w =>translate := translate.push h
+    | none => pure ()
+  for h in translate do
+    if extraArgs.isEmpty then
+              evalTactic (← `(tactic| translate_hypothesis $h))
+            else
+              evalTactic (← `(tactic| translate_hypothesis $h [$$extraArgs,*]))
+
   return picked
 
 /-- One-shot orchestrator:
@@ -828,7 +847,7 @@ elab_rules : tactic
        evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
 
 
-
+  logInfo m! "Collected {collected}"
   evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
   after ← getGoals
 
@@ -875,9 +894,27 @@ elab_rules : tactic
             | none =>
                 break
 
+-- --ISSUES WITH RANGE ANALYSIS
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- variable (a : BitVec 2)
+-- variable (x_bit1 : FF0)
+-- variable (x_bit0 : FF0)
+-- lemma correct :
+-- (((((((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit0))) ∧ (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit1))))) → (((BVModEq.map_f_to_bv_circ 2  (((x_bit0) + (((x_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))) = (a)))))
+--  := by
+--  translate_all
 
 
--- OVERFLOW INSTANCE
+
+
+
+
+-- -- OVERFLOW INSTANCE
 -- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 -- instance : Fact (Nat.Prime ffff0) := by sorry
 -- instance : Fact (NeZero ffff0) := by sorry
@@ -891,9 +928,28 @@ elab_rules : tactic
 -- (((((if (((BVModEq.bool_to_bv 1 (if a then b else c)[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 (if a then b else c)[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (((((if a then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  b) + (- (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  c)))))) + (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  c)))))
 --  := by
 --    unfold map_bv_to_f
+-- Options
+-- def strict add n for all subtractions and don't remove mod aka always assume overflow
+-- 1) strict translation out of scope
+-- 2) up to user when to do strict translation
+-- 3) first do weak then do strong
+-- 4) try to prove that it is greater if it is not then do add n and continue
+--
 
---    translate_goal
---    bv_decide
+
+
+
+
+   -- (b + f - c) % f
+
+  --  translate_goal
+  --  bv_decide
+  --  focus try_apply_lemma_hyps []
+  --  sorry
+  --  focus try_apply_lemma_hyps []
+  --  focus try_apply_lemma_hyps []
+  -- focus try_apply_lemma_hyps []
+
 
 -- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 -- instance : Fact (Nat.Prime ffff0) := by sorry
