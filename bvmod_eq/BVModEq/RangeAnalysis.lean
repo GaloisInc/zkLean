@@ -422,16 +422,25 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
       loopBodyReturn.apply { didMux := false, madeProgress := false, goals := [g], leftSide:= false }
 
 
+syntax (name := splitPropIf) "split_prop_if " term : tactic
 
+macro_rules
+  | `(tactic| split_prop_if $p) =>
+      `(tactic| by_cases h : $p <;> simp [h] at *)
 
-def applyIfLemma (loopBodyReturn : LoopBodyLabel) : ContT LoopBodyResult TacticM Unit := do
-  --logInfo m! "split_ifs"
-  monadLift $ do evalTactic (← `(tactic| split_ifs))
-  loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
+  let decTy ← Meta.inferType cond0
+  if (decTy.getAppApps.size != 0) then
+    let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
+    monadLift $ do evalTactic (← `(tactic| split_prop_if $condSyn))
+    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+  else
+    monadLift $ do evalTactic (← `(tactic| split_ifs))
+    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
 
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (stx : Syntax)
   : ContT LoopBodyResult TacticM Unit := do
-  --logInfo m!"{stx}"
+  logInfo m!"{stx}"
   try
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
@@ -500,7 +509,19 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
       match fn3 with
       | Expr.const name _ =>
         match name with
-        | ``ite => applyIfLemma loopBodyReturn
+        | ``ite =>
+            let iteArgs := unfolded.getAppArgs
+            if iteArgs.size == 5 then
+                let cond := iteArgs[2]!
+                let t    := iteArgs[3]!
+                let e    := iteArgs[4]!
+
+
+                --   -- Boolean IF → split_ifs
+                applyIfLemma loopBodyReturn cond
+              else
+                -- unexpected shape
+                pure ()
         | ``OfNat.ofNat => pure ()
         | _ => applyThisLemma lt
       | _ => pure ()
@@ -516,7 +537,20 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
           | ``HMul.hMul => applyThisLemma mul
           --| ``OfNat.ofNat => applyThisLemma rfl
           -- rfl is a place holder should be something else
-          | ``ite => applyIfLemma loopBodyReturn
+          | ``ite =>
+
+              let iteArgs := unfolded.getAppArgs
+              if iteArgs.size == 5 then
+                let cond := iteArgs[2]!
+                let t    := iteArgs[3]!
+                let e    := iteArgs[4]!
+
+
+                --   -- Boolean IF → split_ifs
+                applyIfLemma loopBodyReturn cond
+              else
+                -- unexpected shape
+                pure ()
           | ``ZMod.val => applyZModLemma loopBodyReturn g mainGoalType leftSide hyps
           | ``BitVec.toNat => applyThisLemma bitvec
           | _ => pure ()
@@ -526,7 +560,19 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
         --logInfo m! "{args[args.size-1]!.getAppFn}"
          match  fn3 with
         | .const ``OfNat.ofNat _ => applyThisLemma constLeq
-        | .const ``ite _  => applyIfLemma loopBodyReturn
+        | .const ``ite _  =>
+             let iteArgs := unfolded.getAppArgs
+              if iteArgs.size == 5 then
+                let cond := iteArgs[2]!
+                let t    := iteArgs[3]!
+                let e    := iteArgs[4]!
+
+
+                --   -- Boolean IF → split_ifs
+                applyIfLemma loopBodyReturn cond
+              else
+                -- unexpected shape
+                pure ()
         | _ =>
           if terms.size >= 2 then
             applyThisLemma expLeq
@@ -564,7 +610,7 @@ elab_rules : tactic
   let mut did_mux := false
   -- as long as we are making progress then continue
   let mut count  := 0
-  while (progress ) do
+  while (progress  ) do
     count := count + 1
     if did_mux then do
       --logInfo m! "We are post did mux"
@@ -584,6 +630,7 @@ elab_rules : tactic
         updatedGoalsReversed := g :: updatedGoalsReversed
         continue
       setGoals [g] -- focus on one goal at a time
+      logInfo m! "GOAL {g}"
       --let k <- instantiateMVars ty
       -- if bothArgsAreApps k then
       --   logInfo m! "WE MADE IT {k}"
@@ -968,12 +1015,48 @@ elab_rules : tactic
 --  apply Nat.add_le_add
 --  apply Nat.le_refl  -- rfl
 --  apply Nat.le_trans --expLeq
-set_option maxHeartbeats  20000000000000000000
 
--- example : 0<= 2 :=by
+
 --   try_apply_lemma_hyps []
 -- TODO THIS SHOULD WORK WITH == 1
 -- example {a b : BitVec 1} : ((if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[0] = true then 1 else 0) +
 --     if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[1] = true then 2 else 0) <
 --   115792089237316195423570985008687907853269984665640564039457584007913129639936 := by
 --   try_apply_lemma_hyps []
+
+-- variable (c : BitVec 2)
+-- variable (b : BitVec 2)
+-- variable (a : Bool)
+-- variable (d : Bool)
+-- example : (if (a) then 1 else 0) <= 2 := by
+--   try_apply_lemma_hyps[]
+
+
+
+-- variable (c : BitVec 2)
+-- variable (b : BitVec 2)
+-- variable (a : Bool)
+-- example :((if (if a = true then b else c)[0] = true then 1 else 0) + if (if a = true then b else c)[1] = true then 2 else 0) <
+--   2 ^ 256
+--  := by
+
+--   try_apply_lemma_hyps[]
+
+
+
+
+
+
+
+
+
+
+
+-- --  SUBSTITUTIONS NEED TO BE DONE WITHIN RANGE ANALYSIS
+-- a : BitVec 2
+-- x_bit1 x_bit0 : FF0
+-- h0_new : (if bool_to_bv 1 a[0] = 1#1 then 1 else 0) = x_bit0
+-- h0 : (if a[0] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit0)
+-- h1_new : (if bool_to_bv 1 a[1] = 1#1 then 1 else 0) = x_bit1
+-- h1 : (if a[1] = true then 1#256 else 0#256) = BitVec.ofNat 256 (ZMod.val x_bit1)
+-- ⊢ ZMod.val x_bit0 + ZMod.val x_bit1 * 2 < 52435875175126190479447740508185965837690552500527637822603658699938581184513
