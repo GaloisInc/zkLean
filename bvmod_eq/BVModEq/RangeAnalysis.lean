@@ -529,7 +529,7 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
       -- catch _err =>
       --  logInfo m! "Error: {(_err.toMessageData)}"
       --  pure ()
-  logInfo m! "How did we get here?"
+  --logInfo m! "How did we get here?"
   let lt ← monadLift (m := TacticM) ``(ZMod.toNatLT)
   let applyThisLemma := applyThisLemma loopBodyReturn g goalType leftSide
   applyThisLemma lt

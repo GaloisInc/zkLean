@@ -367,6 +367,45 @@ partial def countMinusOps2 (e : Expr) : MetaM Nat := do
   | .const _ _ | .sort _ | .lit _ | .bvar _ | .fvar _ | .mvar _ =>
       return here
 
+partial def countAnds (e : Expr) : Nat :=
+  let e := e.consumeMData
+
+  match e.getAppFn with
+  | Expr.const ``And _ =>
+      let args := e.getAppArgs
+      if h : args.size ≥ 2 then
+        let a := args[0]!
+        let b := args[1]!
+        1 + countAnds a + countAnds b
+      else
+        1
+  | _ =>
+      match e with
+      | Expr.app f x => countAnds f + countAnds x
+      | Expr.lam _ _ body _ => countAnds body
+      | Expr.forallE _ _ body _ => countAnds body
+      | _ => 0
+
+
+partial def countOrs (e : Expr) : Nat :=
+  let e := e.consumeMData
+
+  match e.getAppFn with
+  | Expr.const ``Or _ =>
+      let args := e.getAppArgs
+      if h : args.size ≥ 2 then
+        let a := args[0]!
+        let b := args[1]!
+        1 + countOrs a + countOrs b
+      else
+        1
+  | _ =>
+      match e with
+      | Expr.app f x => countOrs f + countOrs x
+      | Expr.lam _ _ body _ => countOrs body
+      | Expr.forallE _ _ body _ => countOrs body
+      | _ => 0
+
 
 
 @[tactic translateHypothesis]
@@ -421,19 +460,39 @@ elab_rules : tactic
   evalTactic (← `(tactic| try simp (config := { maxSteps := 200000 }) only [BVModEq.ZMod.eq_if_val] at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try valify [$[$sargs],*] at $(mkIdent h.getId):ident) )
   --evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
-  for _ in [:i] do
+  for _ in [0:i] do
        evalTactic (← `(tactic| try rw [ZMod.val_sub] at $(mkIdent h.getId):ident))
        evalTactic (← `(tactic| try valify [$[$sargs],*] at $(mkIdent h.getId):ident ) )
        evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
        evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
-  subLoop := true
+
   evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
+  subLoop := true
+  while (subLoop ) do
+    try
+      evalTactic (← `(tactic| rw [BVModEq.ZMod.eq_if_val]  at $(mkIdent h.getId):ident) )
+      evalTactic (← `(tactic| try valify [$[$sargs],*]   at $(mkIdent h.getId):ident))
+    catch _ =>
+      subLoop  := false
+  subLoop := true
   while (subLoop) do
     try
        evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident))
     catch _ =>
       subLoop := false
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
+  let n ← withMainContext do
+    let lctx ← getLCtx
+    let some decl := lctx.findFromUserName? h.getId
+      | throwError m!"No hypothesis named {h.getId}"
+    let ty ← instantiateMVars decl.type
+    let ty ← whnfR ty
+    logInfo m!"{ty}"
+    pure (countAnds decl.type + countOrs ty)
+  logInfo m!"ORS {n}"
+  for _ in [:n] do
+      evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
+      evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
   for _ in [:i] do
       evalTactic (← `(tactic| try rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub] at $(mkIdent h.getId):ident))
       evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
@@ -442,35 +501,6 @@ elab_rules : tactic
 
 
 
-partial def countAnds (e : Expr) : Nat :=
-   match e with
-  | .const ``And _ =>
-      let args := e.getAppArgs
-      if h : args.size ≥ 2 then
-        let a := args[0]!
-        let b := args[1]!
-        1 + countAnds a + countAnds b
-      else
-        1
-  | _ =>
-      match e with
-      | .app f x => countAnds f + countAnds x
-      | _ => 0
-
-partial def countOrs (e : Expr) : Nat :=
-   match e with
-  | .const ``Or _ =>
-      let args := e.getAppArgs
-      if h : args.size ≥ 2 then
-        let a := args[0]!
-        let b := args[1]!
-        1 + countOrs a + countOrs b
-      else
-        1
-  | _ =>
-      match e with
-      | .app f x => countAnds f + countAnds x
-      | _ => 0
 
 
 
@@ -526,7 +556,7 @@ elab_rules : tactic
                         `Lean.Parser.Tactic.simpErase,
                         `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
       sargs := sargs.push ua
-  --logInfo m! "Minuses {i}"
+
   evalTactic (← `(tactic| try unfold BVModEq.bool_to_bv ))
   evalTactic (← `(tactic| try unfold BVModEq.map_bv_to_f  ))
   evalTactic (← `(tactic| try unfold BVModEq.smtSignExtend ))
@@ -536,13 +566,13 @@ elab_rules : tactic
   let mut subLoop := true
     while (subLoop) do
     try
-      evalTactic (← `(tactic| all_goals rw [<- sub_eq_add_neg]))
+      evalTactic (← `(tactic| rw [<- sub_eq_add_neg]))
     catch _ =>
       subLoop := false
   subLoop := true
     while (subLoop) do
     try
-      evalTactic (← `(tactic| all_goals rw [neg_add_to_sub]))
+      evalTactic (← `(tactic| rw [neg_add_to_sub]))
     catch _ =>
       subLoop := false
   let mut g ← getMainGoal
@@ -550,8 +580,8 @@ elab_rules : tactic
   -- if isExists t then
   --      evalTactic (← `(tactic| refine ?_))
   let i  ←  countMinusOps2 t
-  let k := countOrs t
-  logInfo m! "MINUSUS {i}"
+  let k := countOrs t + countAnds t
+  logInfo m! "MINUSUS {i} for {t}"
 
   --TO DO THIS SHOULD BE A TRY CATCH LOOP!
   if i > 0 then
@@ -565,20 +595,25 @@ elab_rules : tactic
   evalTactic (← `(tactic| try rw [<- sub_eq_add_neg]))
   evalTactic (← `(tactic| try rw [neg_add_to_sub]))
   evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
-  -- for _ in [:k] do
-  --     evalTactic (← `(tactic| try rw [BVModEq.ZMod.eq_if_val] ))
-  --     evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
+  for _ in [0:k] do
+      -- let me <- getMainGoal
+      -- logInfo m! "Me1 {me}"
+      evalTactic (← `(tactic| try rw [BVModEq.ZMod.eq_if_val] ))
+      evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
+
 
 
 
   if i > 0 then
-    --  evalTactic (← `(tactic|  try rw [<- sub_eq_add_neg]))
-    --  evalTactic (← `(tactic|  try rw [sub_add_right_recursive]))
-    for _ in [:i] do
-       evalTactic (← `(tactic| try rw [ZMod.val_sub]))
-       evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
-       evalTactic (← `(tactic| try simp ) )
-       evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
+     evalTactic (← `(tactic|  try rw [<- sub_eq_add_neg]))
+     evalTactic (← `(tactic|  try rw [sub_add_right_recursive]))
+    for _ in [0:i] do
+      -- let me <- getMainGoal
+      -- logInfo m! "Me2 {me}"
+      evalTactic (← `(tactic| try rw [ZMod.val_sub]))
+      evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
+      --evalTactic (← `(tactic| try simp ) )
+      --evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
   evalTactic (← `(tactic| try simp ) )
   let goals <- getGoals
   if goals.isEmpty then
@@ -894,6 +929,12 @@ elab_rules : tactic
             | none =>
                 break
 
+
+
+ --rw [<- sub_eq_add_neg]
+
+
+
 --ISSUES WITH RANGE ANALYSIS
 -- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 -- instance : Fact (Nat.Prime ffff0) := by sorry
@@ -910,8 +951,21 @@ elab_rules : tactic
 --  translate_all
 
 
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
 
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- variable (b : Bool)
+-- variable (a : Bool)
+-- lemma correct :
+-- (((((((((- (((if a then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((- (if b then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) * (((- (((if a then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((- (if b then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (((- (((if a then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((- (if b then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) ∧ (((((1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) = (((- (((if a then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((- (if b then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (((a) → (b)))))))
+--  := by
+--  translate_all
 
+--  rw [ZMod.val_sub]
+--  valify
 
 
 -- -- OVERFLOW INSTANCE
@@ -936,8 +990,30 @@ elab_rules : tactic
 -- 4) try to prove that it is greater if it is not then do add n and continue
 --
 
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- variable (fresh_pf2_div_q_bit0 : FF0)
+-- variable (b : BitVec 1)
+-- variable (a : BitVec 1)
+-- variable (fresh_pf7_cmp_bit1 : FF0)
+-- variable (fresh_pf5_is_zero : FF0)
+-- variable (fresh_pf1_div_r : FF0)
+-- variable (fresh_pf6_cmp_bit0 : FF0)
+-- variable (fresh_pf0_div_q : FF0)
+-- variable (fresh_pf4_is_zero_inv : FF0)
+-- variable (fresh_pf3_div_r_bit0 : FF0)
 
 
+
+-- lemma correct :
+-- ((((((((fresh_pf2_div_q_bit0) * (fresh_pf2_div_q_bit0))) = (fresh_pf2_div_q_bit0))) ∧ (((fresh_pf2_div_q_bit0) = (fresh_pf0_div_q))) ∧ (((((fresh_pf3_div_r_bit0) * (fresh_pf3_div_r_bit0))) = (fresh_pf3_div_r_bit0))) ∧ (((fresh_pf3_div_r_bit0) = (fresh_pf1_div_r))) ∧ (((((fresh_pf0_div_q) * (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  b))) = (((BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  a) + (- fresh_pf1_div_r))))) ∧ (((((fresh_pf4_is_zero_inv) * (((fresh_pf0_div_q) + (52435875175126190479447740508185965837690552500527637822603658699938581184512 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (((- fresh_pf5_is_zero) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) ∧ (((((fresh_pf5_is_zero) * (((fresh_pf0_div_q) + (52435875175126190479447740508185965837690552500527637822603658699938581184512 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) ∧ (((((fresh_pf6_cmp_bit0) * (fresh_pf6_cmp_bit0))) = (fresh_pf6_cmp_bit0))) ∧ (((((fresh_pf7_cmp_bit1) * (fresh_pf7_cmp_bit1))) = (fresh_pf7_cmp_bit1))) ∧ (((((fresh_pf6_cmp_bit0) + (((fresh_pf7_cmp_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = ((fresh_pf1_div_r) + (- (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  b)) + (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) ∧ (((((((- fresh_pf5_is_zero) + (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) * (fresh_pf7_cmp_bit1))) = (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) → (((if (((BVModEq.bool_to_bv 1 (BitVec.udiv a b)[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf2_div_q_bit0)))))
+--  := by
+--   translate_all
+  ---rw [BVModEq.ZMod.eq_if_val]
 
 
    -- (b + f - c) % f
