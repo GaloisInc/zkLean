@@ -447,6 +447,14 @@ elab_rules : tactic
     let some decl := lctx.findFromUserName? h.getId
       | throwError m!"No hypothesis named {h.getId}"
     countMinusOps2 decl.type
+   let k ← withMainContext do
+    let lctx ← getLCtx
+    let some decl := lctx.findFromUserName? h.getId
+      | throwError m!"No hypothesis named {h.getId}"
+    let ty ← instantiateMVars decl.type
+    let ty ← whnfR ty
+    logInfo m!"{ty}"
+    pure (countAnds decl.type + countOrs ty)
   --logInfo m! "MINUSES HIP {i}"
 
   -- TO DO THIS SHOULD BE A TRY CATCH LOOP!
@@ -458,13 +466,20 @@ elab_rules : tactic
     catch _ =>
       mLoop := false
   evalTactic (← `(tactic| try simp (config := { maxSteps := 200000 }) only [BVModEq.ZMod.eq_if_val] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try rw [<- sub_eq_add_neg]  at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try rw [neg_add_to_sub]  at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try valify [$[$sargs],*] at $(mkIdent h.getId):ident) )
   --evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
+  for _ in [0:k] do
+
+      evalTactic (← `(tactic| try rw [BVModEq.ZMod.eq_if_val]  at $(mkIdent h.getId):ident) )
+      evalTactic (← `(tactic| try valify [$[$sargs],*]   at $(mkIdent h.getId):ident))
+
   for _ in [0:i] do
        evalTactic (← `(tactic| try rw [ZMod.val_sub] at $(mkIdent h.getId):ident))
        evalTactic (← `(tactic| try valify [$[$sargs],*] at $(mkIdent h.getId):ident ) )
-       evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
-       evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
+       --evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
+      -- evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
 
   evalTactic (← `(tactic| try simp at $(mkIdent h.getId):ident) )
   subLoop := true
@@ -481,22 +496,16 @@ elab_rules : tactic
     catch _ =>
       subLoop := false
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
-  let n ← withMainContext do
-    let lctx ← getLCtx
-    let some decl := lctx.findFromUserName? h.getId
-      | throwError m!"No hypothesis named {h.getId}"
-    let ty ← instantiateMVars decl.type
-    let ty ← whnfR ty
-    logInfo m!"{ty}"
-    pure (countAnds decl.type + countOrs ty)
-  logInfo m!"ORS {n}"
-  for _ in [:n] do
+  evalTactic (← `(tactic| try bvify [$[$sargs],*]))
+
+  logInfo m!"ORS {k}"
+  for _ in [:k] do
       evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
       evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
   for _ in [:i] do
       evalTactic (← `(tactic| try rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub] at $(mkIdent h.getId):ident))
       evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
-  evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
+
 
 
 
@@ -634,11 +643,10 @@ elab_rules : tactic
       subLoop := false
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff 256]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
-  let n := countAnds t + k
-  for _ in [:n] do
+  --let n := countAnds t + k
+  for _ in [:k] do
       evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff 256]))
       evalTactic (← `(tactic| try bvify [$[$sargs],*]))
-  evalTactic (← `(tactic| try bvify [$[$sargs],*]))
   if i > 0 then
     for _ in [:i] do
       evalTactic (← `(tactic| try rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub]))
