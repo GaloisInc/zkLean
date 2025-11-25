@@ -496,7 +496,7 @@ elab_rules : tactic
     catch _ =>
       subLoop := false
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff 256] at $(mkIdent h.getId):ident))
-  evalTactic (← `(tactic| try bvify [$[$sargs],*]))
+  evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
 
   logInfo m!"ORS {k}"
   for _ in [:k] do
@@ -941,6 +941,22 @@ elab_rules : tactic
 
  --rw [<- sub_eq_add_neg]
 
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- variable (fresh_pf2_sum_bit2 : FF0)
+-- variable (b : BitVec 3)
+-- variable (a : BitVec 3)
+-- variable (fresh_pf1_sum_bit1 : FF0)
+-- variable (fresh_pf0_sum_bit0 : FF0)
+-- variable (fresh_pf3_sum_bit3 : FF0)
+-- lemma correct :
+-- ((((((((((((fresh_pf0_sum_bit0) * (fresh_pf0_sum_bit0))) = (fresh_pf0_sum_bit0))) ∧ (((((fresh_pf1_sum_bit1) * (fresh_pf1_sum_bit1))) = (fresh_pf1_sum_bit1)))) ∧ (((((fresh_pf2_sum_bit2) * (fresh_pf2_sum_bit2))) = (fresh_pf2_sum_bit2)))) ∧ (((((fresh_pf3_sum_bit3) * (fresh_pf3_sum_bit3))) = (fresh_pf3_sum_bit3)))) ∧ (((((((fresh_pf0_sum_bit0) + (((fresh_pf1_sum_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) + (((fresh_pf2_sum_bit2) * (4 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) + (((fresh_pf3_sum_bit3) * (8 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (((BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  a) + (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  b))))))) → ((((((if (((BVModEq.bool_to_bv 1 (BitVec.add a b)[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf0_sum_bit0))) ∧ (((if (((BVModEq.bool_to_bv 1 (BitVec.add a b)[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf1_sum_bit1)))) ∧ (((if (((BVModEq.bool_to_bv 1 (BitVec.add a b)[2]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf2_sum_bit2)))))))
+--  := by
+--   translate_all
 
 
 --ISSUES WITH RANGE ANALYSIS
