@@ -42,6 +42,13 @@ open Lean Meta
         - match on the head `fn` to handle known operators (HAdd, HSub, HMul, HMod, ZMod.val)
         - otherwise, combine child widths conservatively
 -/
+
+private def termFor (nm : Name) : TacticM (TSyntax `term) := withMainContext do
+  match (← getLCtx).findFromUserName? nm with
+  | some d => pure ⟨(mkIdent d.userName).raw⟩
+  | none   => pure ⟨(mkIdent nm).raw⟩
+
+
 partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat := do
   let fn  := e.getAppFn
   let args := e.getAppArgs
@@ -64,17 +71,17 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
         match decl.type.getAppFnArgs with
         | (``LE.le, #[_, _, lhs, rhs]) =>
           match (← whnf rhs) with
-          | (Expr.lit (Literal.natVal 1)) => do
+          | (Expr.lit (Literal.natVal n)) => do
 
               if  (<- collectTerms e).contains (<- collectTerms lhs).toList[0]!  then
-                 logInfo m!"this is not the issue"
-                 return 1
+                 --logInfo m!"this is not the issue"
+                 return n
               else
                 pure ()
 
           | _ =>  pure ()
         | _ =>  pure ()
-      logInfo m! "WHY ARE WE HERE {e}"
+      --logInfo m! "WHY ARE WE HERE {e}"
       return ( <- CalcBitWidth args[0]! hs)
     |  ``Eq  =>
       return (Nat.max (<- CalcBitWidth args[args.size-1]! hs) (<- CalcBitWidth args[args.size-2]! hs))
@@ -127,6 +134,10 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
     | ``GetElem.getElem =>
        if  args.size ≥ 2 then
         return  (<- CalcBitWidth args[args.size-2]! hs)
+       throwError "wrong # args and {args}"
+    | ``LE.le =>
+       if  args.size ≥ 2 then
+          return Nat.max (<- CalcBitWidth args[args.size-1]! hs)  (<- CalcBitWidth args[args.size-2]! hs)
        throwError "wrong # args and {args}"
     | _ =>
       logInfo m!"unsupported ap {name} with {args}"
@@ -219,8 +230,12 @@ lemma if_to_bounds {b: Prop} {x: ZMod f} [Decidable b]: (if b then 1 else 0) =  
 (if b then 1 else 0) =  x /\  ZMod.val x <= 1 := by
 sorry
 
-lemma duplicate {b a : ZMod ff} : b = a <->
+lemma duplicate {b  a: ZMod f} : b = a <->
   b = a /\ b = a := by
+  simp
+
+lemma duplicate_leq {b a: Nat} : b <= a <->
+  b <= a /\ b <= a := by
   simp
 
 -- lemma sub_add_right_recursive {α : Type*} [AddCommGroup α]
@@ -240,13 +255,13 @@ def matchOfNatVal? (e : Expr) : MetaM (Option (Nat × Expr × Expr)) := do
   --logInfo m!"{args}"
   -- We expect: BitVec.ofNat k (ZMod.val x)
   if fn.isConstOf ``BitVec.ofNat ∧ args.size = 2 then
-    --logInfo m!"{fn}"
+   --logInfo m!"{fn}"
     let kExpr := args[0]!
     let valExpr := args[1]!
     match kExpr.getAppFn with
     | Expr.const ``OfNat.ofNat _ =>
-        -- logInfo m!"    Found nat literal width = {kExpr}"
-        -- logInfo m!"    kExpr.args = {kExpr.getAppArgs}"
+        --logInfo m!"    Found nat literal width = {kExpr}"
+       -- logInfo m!"    kExpr.args = {kExpr.getAppArgs}"
         match kExpr.getAppArgs with
         | #[_, numExpr, _inst] =>
             match numExpr with
@@ -256,8 +271,15 @@ def matchOfNatVal? (e : Expr) : MetaM (Option (Nat × Expr × Expr)) := do
                let args2 := valExpr.getAppArgs
 
                 if fn2.isConstOf ``ZMod.val ∧ args2.size = 2 ∧ args1.size=3 then
+                 -- logInfo m!"Ecuse me? {args2}"
                   return some (k, args2[1]!, args2[0]!)
+                if fn2.isConstOf ``GetElem ∧ args2.size = 2 ∧ args1.size=3 then
+                   --logInfo m!"{fn2}"
+                   return some (k, args2[1]!, args2[0]!)
                 else
+                  --  logInfo m!"{valExpr}"
+                  --  logInfo m!"{fn2}"
+                  --  logInfo m!"{args2}"
                   return none
             | _ => return none
 
@@ -347,7 +369,7 @@ def collectFromContext : TacticM (Array (Nat × Expr × Expr)) := do
     let mut out : Array (Nat × Expr × Expr) := #[]
     --logInfo m!"Starting {goalTy}"
     out := out ++ (← collectMatches (goalTy))
-   -- logInfo m!"GOT {out}"
+    logInfo m!"GOT {out}"
     let lctx ← getLCtx
     --logInfo "=== RAW HYP TYPES ==="
     for decl in lctx do
@@ -381,49 +403,56 @@ def collectFromContext : TacticM (Array (Nat × Expr × Expr)) := do
 - you can then use those lemmas to rewrite / simp.
 -/
 
-def lookupGroup (fid : FVarId) (gs : List (FVarId × List Nat))
-  : Option (List Nat) :=
-  match gs.find? (fun (p : FVarId × List Nat) => p.fst == fid) with
+def lookupGroup (fid : Name) (gs : List (Name × Expr × List Nat))
+  : Option (Expr × List Nat) :=
+  match gs.find? (fun (p : Name × Expr × List Nat) => p.fst == fid) with
   | some (_, ws) => some ws
   | none => none
 
 
 
-def insertGroup (fid : FVarId) (w : Nat)
-    (gs : List (FVarId × List Nat))
-    : List (FVarId × List Nat) :=
-  let rec go (acc : List (FVarId × List Nat)) (rest : List (FVarId × List Nat)) :=
+def insertGroup (fid : Name) (e:Expr) (w : Nat)
+    (gs : List (Name × Expr × List Nat))
+    : List (Name × Expr × List Nat) :=
+  let rec go (acc : List (Name × Expr ×  List Nat)) (rest : List (Name × Expr ×  List Nat)) :=
     match rest with
-    | [] => (fid, [w]) :: acc
-    | (fid', ws) :: tl =>
+    | [] => (fid, e, [w]) :: acc
+    | (fid', x, ws) :: tl =>
       if fid' == fid then
-        (fid', w :: ws) :: acc ++ tl
+        (fid', x, w :: ws) :: acc ++ tl
       else
-        go ((fid', ws) :: acc) tl
+        go ((fid',x, ws) :: acc) tl
   go [] gs
 
+syntax "autoCastBits" "[" ident,* "]" : tactic
 
-elab "autoCastBits" : tactic => do
+elab_rules : tactic
+| `(tactic| autoCastBits [$ids,*]) => do
+    --let names := ids.map (·.getId)
+    --logInfo m!"Parsed names: {names}"
+    -- your real logic here
   --logInfo "=== autoCastBits: starting ==="
-
+  let hyps := (ids.getElems.map (·.getId)).toList
   let pairsArr ← collectFromContext
   let pairs := pairsArr.toList
-  --logInfo m!"Detected pairs (width, expr): {pairs}"
+  logInfo m!"Detected pairs (width, expr): {pairs}"
 
   -- Group widths by underlying variable, keyed by FVarId
-  let mut groups : List (FVarId × List Nat) := []
+  let mut groups : List (Name  × Expr × List Nat) := []
   let mut modulus : Option Expr := none
   for (w, x, f) in pairs do
     modulus := some f
-    if let some fid := x.fvarId? then
-      match lookupGroup fid groups with
+    let myName := (<- collectTerms x).toList[0]!
+    --let fid := (<- collectTerms x).toList[0]!
+   -- if let some fid := x.fvarId? then
+      match lookupGroup myName groups with
       | some ws =>
-          groups := insertGroup fid w groups
+          groups := insertGroup myName x w groups
       | none =>
-          groups := (fid, [w]) :: groups
+          groups := (myName, x, [w]) :: groups
   --logInfo "=== Groups after aggregation ==="
-  for (fid, ws) in groups do
-   logInfo m!"{fid.name}: widths = {ws}"
+  -- for (fid, ws) in groups do
+  --  logInfo m!"{fid.name}: widths = {ws}"
 
   let some modExpr := modulus
     | throwError "[autoCastBits] no modulus found"
@@ -431,23 +460,23 @@ elab "autoCastBits" : tactic => do
   let mut goal ← getMainGoal
 
   -- For each variable that appears with multiple distinct widths, create a lemma
-  for (fid, ws) in groups do
+  for (fid, x, ws) in groups do
 
     let uniq := ws.eraseDups
     --if uniq.length > 1 then
       --let minW := uniq.foldl Nat.min uniq.head!
-      let maxW := uniq.foldl Nat.max uniq.head!
+    let maxW := uniq.foldl Nat.max uniq.head!
 
         -- reconstruct the variable and get a nicer name
-      let x := Expr.fvar fid
-      --logInfo m!"{x}, {ws}"
-          match lctx.find? fid with
-          | none =>
-              pure ()
-          | some decl => do
-              let baseName := decl.userName
-              for w in ws do
-                if w != maxW then
+      --let x := Expr.fvar fid
+    --logInfo m!"{x}, {ws}"
+          -- match lctx.find? fid with
+          -- | none =>
+          --     pure ()
+          -- | some decl => do
+    let baseName := fid
+    for w in ws do
+       if w != maxW then
                   let lemmaName := baseName.appendAfter s!"_cast_{w}"
 
                   let zmodValBase := mkConst ``_root_.ZMod.val
@@ -480,18 +509,42 @@ elab "autoCastBits" : tactic => do
 
 
               replaceMainGoal [goal]
-              let bitsStx : TSyntax `term := Syntax.mkNumLit (toString maxW)
-              let hname := Name.mkSimple s!"h_val_{baseName}"
-              let hident : TSyntax `ident := mkIdent hname
-              let xStx ← Term.exprToSyntax decl.toExpr
-              let tac ← `(tactic|
-               have $hident :=
-                  ZMod.val_le_BV $xStx $bitsStx (h := by try decide)
-              )
-              try
-                evalTactic tac
-              catch _ => pure ()
-              goal ← getMainGoal
+              -- HARD CODED FIX
+     let bitsStx : TSyntax `term := Syntax.mkNumLit (toString maxW)
+    if maxW > 250 then
+
+                let hname := Name.mkSimple s!"h_val_{baseName}"
+                let hident : TSyntax `ident := mkIdent hname
+                let xStx ← Term.exprToSyntax x
+                let tac ← `(tactic|
+                have $hident :=
+                    ZMod.val_le_BV $xStx $bitsStx (h := by try decide)
+                )
+                try
+                  evalTactic tac
+                catch _ => pure ()
+    let g <- getMainGoal
+    g.withContext do
+      let lctx ← getLCtx
+
+      for c in hyps do
+        try
+          -- ✅ resolve the Name `c` to a real local hypothesis
+          let some decl := lctx.findFromUserName? c
+            | throwError m!"❌ Cannot find hypothesis {c}"
+
+          let hIdent := Lean.mkIdent decl.userName
+
+          -- ✅ specialize hIdent with a TERM
+          evalTactic (← `(tactic| specialize $hIdent $bitsStx (by decide)))
+
+          -- ✅ simp at that hypothesis
+        -- evalTactic (← `(tactic| simp at $(mkIdent c):ident))
+
+        catch e =>
+          logInfo m!"{e.toMessageData}"
+
+    goal ← getMainGoal
 
 
   --logInfo "=== autoCastBits: finished ==="
@@ -771,6 +824,7 @@ elab_rules : tactic
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
   logInfo m!"{bitsize}"
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx] at $(mkIdent h.getId):ident))
+  evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_leq_iff $bitsizeStx] at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
   for _ in [:k] do
       evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx] at $(mkIdent h.getId):ident))
@@ -1189,7 +1243,24 @@ def smartTranslateOne
             --evalTactic (← `(tactic| simp at $(mkIdent h.getId):ident))
             evalTactic (← `(tactic| rcases $(mkIdent h.getId):ident  with ⟨$h1, $h2⟩))
             return (some h1, some h2, none)
-          catch _ => pure ()
+          catch _ =>
+            try
+              evalTactic (← `(tactic| rw [BVModEq.map_f_to_bv] at $(mkIdent h.getId):ident))
+              evalTactic (← `(tactic| simp at $(mkIdent h.getId):ident))
+              let h1 := mkIdent (Name.mkSimple s!"{h.getId}_1")
+              let h2 := mkIdent (Name.mkSimple s!"{h.getId}_2")
+              evalTactic (← `(tactic| rcases $(mkIdent h.getId):ident  with ⟨$h1, $(mkIdent h.getId):ident⟩))
+              evalTactic (← `(tactic| apply Nat.le_of_lt_succ  at $h1))
+              evalTactic (← `(tactic| rw [duplicate_leq] at $h1:ident))
+              let newName := mkIdent (Name.mkSimple s!"{h.getId}_new")
+
+              evalTactic (← `(tactic|
+                  rcases $h1:ident with ⟨$h1:ident, $newName⟩))
+              evalTactic (← `(tactic| rw [BVModEq.extract_bv_leq] at $h1:ident))
+
+              return (some newName, some h1, none)
+            catch e =>
+                logInfo m!"{e.toMessageData}"
 
 
        return (none, none, some h)
@@ -1319,73 +1390,106 @@ elab_rules : tactic
   if after.isEmpty then
     return
 
-  -- try
-  --    evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-  -- catch _ =>
-  --   --evalTactic (← `(tactic| autoCastBits))
-  --   --let hs <- addZModValBounds 256
-  --   evalTactic (← `(tactic| autoCastBits))
-  --   let mut rw := true
-  --   logInfo m!"{changed}"
-  --   while (rw) do
-  --     try
-  --         evalTactic (← `(tactic| intro h))
-  --         evalTactic (← `(tactic| try rw [h]))
-  --         for hyp in ids ++ changed  do
-  --           evalTactic (← `(tactic| try rw [h] at $(mkIdent hyp.getId):ident))
-  --         evalTactic (← `(tactic| clear h))
-  --          -- evalTactic (← `(tactic| try simp only [BitVec.setWidth] at $(mkIdent hyp.getId):ident))
-  --     catch _ =>
-  --       rw := false
-    --evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+  try
+     evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+  catch _ =>
+    --evalTactic (← `(tactic| autoCastBits))
+    --let hs <- addZModValBounds 256
+    logInfo m!"{changed}"
+    evalTactic (← `(tactic| autoCastBits [$[$changed],*]))
+    let mut rw := true
+    while (rw) do
+      try
+          evalTactic (← `(tactic| intro h))
+          evalTactic (← `(tactic| try rw [h]))
+          for hyp in ids ++ changed  do
+            evalTactic (← `(tactic| try rw [h] at $(mkIdent hyp.getId):ident))
+          evalTactic (← `(tactic| clear h))
+           -- evalTactic (← `(tactic| try simp only [BitVec.setWidth] at $(mkIdent hyp.getId):ident))
+      catch _ =>
+        rw := false
+    try
+      evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+    catch _ =>
+      let mut index :=0
+      let fv1T : TSyntax `term := (← termFor `fv1)
+      let fv2T : TSyntax `term := (← termFor `fv2)
+      while index < collected.size/2 do
 
+        -- names for the bound and its equality
+        let idName  := Name.mkSimple s!"b0_{index}"
+
+        -- identifiers/syntax nodes
+        let idSyn   : TSyntax `ident := mkIdent idName
+        let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+
+        -- safest access: .get! (parses reliably inside quotations)
+        evalTactic (← `(tactic|
+          set $idSyn := $fv1T[$idxSyn]
+        ))
+        index := index + 1
+      index := 0
+      while index < collected.size/2 do
+        -- names for the bound and its equality
+        let idName  := Name.mkSimple s!"b1_{index}"
+
+        -- identifiers/syntax nodes
+        let idSyn   : TSyntax `ident := mkIdent idName
+        let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+
+        -- safest access: .get! (parses reliably inside quotations)
+        evalTactic (← `(tactic|
+          set $idSyn := $fv2T[$idxSyn]
+        ))
+        index := index + 1
+       evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
 
   -- -- -- --logInfo m! "Collected {collected}"
-  -- evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
-  -- after ← getGoals
+  evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
+  after ← getGoals
 
-  -- if !after.isEmpty then
-  --   while (!after.isEmpty) do
-  -- -- record the current state
-  --     let before ← getGoals
+  if !after.isEmpty then
+    while (!after.isEmpty) do
+  -- record the current state
+      let before ← getGoals
 
-  -- -- run your tactics
-  --     evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx))
-  --     evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
+  -- run your tactics
+      evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx))
+      evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
 
-  -- -- read the new state
-  --     after ← getGoals
+  -- read the new state
+      after ← getGoals
 
-  --     -- if no change → stop
-  --     if before == after then
-  --       let goal ← getMainGoal
-  --       let goalExpr ← instantiateMVars (← goal.getType)
-  --       let terms <- collectTerms goalExpr
+      -- if no change → stop
+      if before == after then
+        let goal ← getMainGoal
+        let goalExpr ← instantiateMVars (← goal.getType)
+        let terms <- collectTerms goalExpr
 
-  --         -- detect goals of form  x < m  or  x ≤ m
-  --       let termList := terms.toList
+          -- detect goals of form  x < m  or  x ≤ m
+        let termList := terms.toList
 
-  -- -- require exactly one variable
-  --       if termList.length != 1 then
-  --           break
-  --       let onlyName := termList.head!
-  --       let lctx ← getLCtx
-  --       match lctx.findFromUserName? onlyName with
-  --       | none =>
-  --           --logInfo m!"Variable {onlyName} not found in context"
-  --           break
-  --       | some decl =>
-  --           let fvarId := decl.fvarId
+  -- require exactly one variable
+        if termList.length != 1 then
+            break
+        let onlyName := termList.head!
+        let lctx ← getLCtx
+        match lctx.findFromUserName? onlyName with
+        | none =>
+            --logInfo m!"Variable {onlyName} not found in context"
+            break
+        | some decl =>
+            let fvarId := decl.fvarId
 
-  --           let varMap ← varToHypRef.get
+            let varMap ← varToHypRef.get
 
-  --           match lookup varMap fvarId with
-  --           | some hypExpr =>
-  --             --logInfo m! "{hypExpr}"
-  --             evalTactic (← `(tactic| simp [← $hypExpr] at *))
-  --             after ← getGoals
-  --           | none =>
-  --               break
+            match lookup varMap fvarId with
+            | some hypExpr =>
+              --logInfo m! "{hypExpr}"
+              evalTactic (← `(tactic| simp [← $hypExpr] at *))
+              after ← getGoals
+            | none =>
+                break
 
 --set_option maxRecDepth 200000000
 -- lemma  neg_param (x y z : ZMod p) :
@@ -1413,33 +1517,33 @@ abbrev ff := 5243587517512619047944774050818596583769055250052763782260365869993
 --   field_to_nat f := f.val
 
 
-abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
-instance : Fact (Nat.Prime ff) := by sorry
-variable (b : BitVec 2)
-variable (a : BitVec 2)
-variable (fresh_pf2_cmp_bit2 : FF0)
-variable (fresh_pf1_cmp_bit1 : FF0)
-variable (fresh_pf0_cmp_bit0 : FF0)
--- lemma correct :
--- (((((((((((fresh_pf0_cmp_bit0) * (fresh_pf0_cmp_bit0))) = (fresh_pf0_cmp_bit0))) ∧ (((((fresh_pf1_cmp_bit1) * (fresh_pf1_cmp_bit1))) = (fresh_pf1_cmp_bit1)))) ∧ (((((fresh_pf2_cmp_bit2) * (fresh_pf2_cmp_bit2))) = (fresh_pf2_cmp_bit2)))) ∧ ((((((fresh_pf0_cmp_bit0) + (((fresh_pf1_cmp_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) + (((fresh_pf2_cmp_bit2) * (4 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = ((((((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (52435875175126190479447740508185965837690552500527637822603658699938581184511 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) + (- (((if (((BVModEq.bool_to_bv 1 b[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 b[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (52435875175126190479447740508185965837690552500527637822603658699938581184511 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) + (3 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) → (((((((fresh_pf2_cmp_bit2) * (fresh_pf2_cmp_bit2))) = (fresh_pf2_cmp_bit2))) ∧ (((((1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) = (fresh_pf2_cmp_bit2))) = (BitVec.ult a b)))))))
---  := by
---  translate_all [] false
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ff) := by sorry
+-- variable (b : BitVec 2)
+-- variable (a : BitVec 2)
+-- variable (fresh_pf2_cmp_bit2 : FF0)
+-- variable (fresh_pf1_cmp_bit1 : FF0)
+-- variable (fresh_pf0_cmp_bit0 : FF0)
+-- -- lemma correct :
+-- -- (((((((((((fresh_pf0_cmp_bit0) * (fresh_pf0_cmp_bit0))) = (fresh_pf0_cmp_bit0))) ∧ (((((fresh_pf1_cmp_bit1) * (fresh_pf1_cmp_bit1))) = (fresh_pf1_cmp_bit1)))) ∧ (((((fresh_pf2_cmp_bit2) * (fresh_pf2_cmp_bit2))) = (fresh_pf2_cmp_bit2)))) ∧ ((((((fresh_pf0_cmp_bit0) + (((fresh_pf1_cmp_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) + (((fresh_pf2_cmp_bit2) * (4 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = ((((((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (52435875175126190479447740508185965837690552500527637822603658699938581184511 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) + (- (((if (((BVModEq.bool_to_bv 1 b[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 b[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (52435875175126190479447740508185965837690552500527637822603658699938581184511 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) + (3 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) → (((((((fresh_pf2_cmp_bit2) * (fresh_pf2_cmp_bit2))) = (fresh_pf2_cmp_bit2))) ∧ (((((1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) = (fresh_pf2_cmp_bit2))) = (BitVec.ult a b)))))))
+-- --  := by
+-- --  translate_all [] false
 
-instance : Witnessable (ZMod ff) (ZMod ff) := by sorry
+-- instance : Witnessable (ZMod ff) (ZMod ff) := by sorry
 
-instance NotTwo: BVModEq.GtTwo (ff) := by
-  have hlt: 2 < ff := by decide
-  sorry
+-- instance NotTwo: BVModEq.GtTwo (ff) := by
+--   have hlt: 2 < ff := by decide
+--   sorry
 
-#check (inferInstance : SubNegMonoid (ZMod ff))
+-- #check (inferInstance : SubNegMonoid (ZMod ff))
 
-instance IsThisTrue: SubNegMonoid (ZMod ff) :=
-  inferInstance
+-- instance IsThisTrue: SubNegMonoid (ZMod ff) :=
+--   inferInstance
 
 def OR_16  : Subtable FF0 16 :=
   subtableFromMLE (fun x => 0 + ((1*((x[7] + x[15] - x[7]*x[15])))) + 2*(x[6] + x[14] - x[6]*x[14]) + 4*(x[5] + x[13] - x[5]*x[13]) + 8*(x[4] + x[12] - x[4]*x[12]) + 16*(x[3] + x[11] - x[3]*x[11]) + 32*(x[2] + x[10] - x[2]*x[10]) + 64*(x[1] + x[9] - x[1]*x[9]) + 128*(x[0] + x[8] - x[0]*x[8]))
 
-#check FF0
+-- #check FF0
 
 lemma or_mle_one_chunk(bv1 bv2 : BitVec 8) (fv1 fv2 : Vector FF0 8) :
   some bvoutput = BVModEq.map_f_to_bv 8 foutput ->
@@ -1468,6 +1572,20 @@ lemma or_mle_one_chunk(bv1 bv2 : BitVec 8) (fv1 fv2 : Vector FF0 8) :
   unfold subtableFromMLE
   unfold Vector.append
   translate_all false
+
+
+
+  --bv_decide
+  --have h : ∀ x : Nat, x < 2 → 2* foutput.val = 0#2 := by sorry
+
+
+  -- sorry
+  --try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1,h5_1, h6_1,h7_1, h8_1,h9_1,h10_1,h11_1, h12_1, h13_1, h14_1,h15_1,h16_1]
+
+
+
+  --rw [BVModEq.map_f_to_bv] at h0
+
 
   --simp
   ---translate_all [] false

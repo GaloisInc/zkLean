@@ -914,7 +914,7 @@ elab_rules : tactic
       -- UNCOMMENT LATER
 
       if exprHasMod instantiatedGoalType then do
-         logInfo m! "PROGRESS?"
+
          let mut modLoop:= true
          while (modLoop) do
             count :=count + 1
