@@ -37,6 +37,10 @@ lemma neg_add_to_sub {α : Type*} [AddCommGroup α] (a b : α) :
   rw [sub_eq_add_neg]
   rw [add_comm (-a) b]
 
+lemma  neg_param (x y z : ZMod p) :
+  x + (-y -z) = (x - y) -z := by
+  ring_nf
+
 lemma if_to_bounds {b: Prop} {x: ZMod f} [Decidable b]: (if b then 1 else 0) =  x <->
 (if b then 1 else 0) =  x /\  ZMod.val x <= 1 := by
 sorry
@@ -385,10 +389,10 @@ def checkTermsAreBitVecs (g : MVarId) (terms : NameSet) : MetaM Nat:=
             match ty.getAppFnArgs with
                 | (``ZMod, #[_]) => return 0
                 | (``BitVec, #[_]) =>  bitVecCount :=  bitVecCount + 1  -- ✅ ok
-                | _ => return 20000
+                | _ => return 0
         | _ =>
           logInfo m!"⚠️ variable { t.getAppFnArgs} has non-BitVec type {t}"
-          return 20000
+          return 0
     return  bitVecCount
 
 
@@ -457,7 +461,7 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
   (g : MVarId) (hyps : List Name) (terms : NameSet)
   : ContT LoopBodyResult TacticM Unit := do
   let m <- checkTermsAreBitVecs g terms
-  --logInfo m!"umm for {g}"
+  --logInfo m!"umm for {m}"
   --Step 1 we should check if terms are bit vectors
   if (m==0)  then
     --logInfo m!"HUH"
@@ -507,7 +511,7 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
            -- logInfo m!"HUH"
             loopBodyReturn.apply { didMux := false, madeProgress := true, goals := newGoals, leftSide:= false }
       else
-         --logInfo m!"HUH11"
+         --logInfo m!"{m}"
          return ()
 
 syntax (name := splitPropIf) "split_prop_if " term : tactic
@@ -529,7 +533,7 @@ def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyR
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (stx : Syntax)
   : ContT LoopBodyResult TacticM Unit := do
   try
-    logInfo m!"WHY{stx} for {goalType}"
+    --logInfo m!"WHY{stx} for {goalType}"
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
   catch _ =>
@@ -539,7 +543,7 @@ def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
 
 def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (hyps : List Name)
   : ContT LoopBodyResult TacticM Unit := do
-  logInfo m!"ZMODLEMMA"
+  --logInfo m!"ZMODLEMMA"
   for hName in hyps do
     try
       -- need to do it with context so names are initialized
@@ -584,7 +588,7 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
 
     catch _ => pure ()
   try
-       logInfo m!"and we did this?"
+       --logInfo m!"and we did this?"
        monadLift $ do evalTactic  (← `(tactic| valify [] ))
        let subgoals ← getGoals
        return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
@@ -594,7 +598,7 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
          let subgoals ← getGoals
          return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
       catch e =>
-      logInfo m!"valify failed?"
+      --logInfo m!"valify failed?"
       logInfo m!"{e.toMessageData}"
       pure ()
 
@@ -809,6 +813,7 @@ elab_rules : tactic
   -- important for mux discovery
   evalTactic (← `(tactic| all_goals try rw [neg_add_to_sub]))
   evalTactic (← `(tactic| all_goals try rw [<- sub_eq_add_neg]))
+  evalTactic (← `(tactic| all_goals try rw [neg_param]))
   evalTactic (← `(tactic| all_goals try rw [sub_add_right_recursive]))
   evalTactic (← `(tactic|  all_goals try simp [Nat.mul_assoc]))
   let mut sanity <- getGoals
@@ -848,7 +853,7 @@ elab_rules : tactic
       setGoals [g] -- focus on one goal at a time
       --logInfo m! "GOAL {g}"
       let goalType ← g.getType
-      logInfo m! "GOALS {<- getGoals}"
+      --logInfo m! "GOALS {<- getGoals}"
       -- first we try to apply hypothesis
       let instantiatedGoalType ← instantiateMVars goalType
       let (fn, args) := instantiatedGoalType.getAppFnArgs
@@ -873,14 +878,14 @@ elab_rules : tactic
             updatedGoalsReversed := gs ++ updatedGoalsReversed
             progress := true
             handled := true
-            logInfo m! "why do we end up here"
+            --logInfo m! "why do we end up here"
             continue
               --evalTactic (← `(tactic| nth_rewrite 2 [Nat.mod_eq_of_lt]))
           catch  e =>
               --progress := false
               let gs <- getGoals
               updatedGoalsReversed := gs ++ updatedGoalsReversed
-              logInfo m! "FAILED"
+              --logInfo m! "FAILED"
               continue
         else
             let gs <- getGoals
@@ -916,7 +921,7 @@ elab_rules : tactic
             try
               evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
               let cur_g ← getGoals
-              logInfo m! "Goals after [Nat.mod_eq_of_lt]):\n{← getGoals}"
+              --logInfo m! "Goals after [Nat.mod_eq_of_lt]):\n{← getGoals}"
               match cur_g with
               | [] =>
                   throwError "❌ No goals after Nat.mod_eq_of_lt"
@@ -940,15 +945,15 @@ elab_rules : tactic
                     throwError m! "try_apply failed {after}"
               | g_one :: g_last :: rest_rev => do
                   setGoals [g_last]
-                  logInfo m! "Goals after isolate:\n{← getGoals}"
-                  logInfo "Attempting: try_apply_lemma_hyps"
+                  --logInfo m! "Goals after isolate:\n{← getGoals}"
+                  --logInfo "Attempting: try_apply_lemma_hyps"
                   evalTactic (← `(tactic| try_apply_lemma_hyps [$[$hs],*]))
 
                   let after ← getGoals
-                  logInfo m! "Goals after try_apply_lemma_hyps:\n{after}"
+                  --logInfo m! "Goals after try_apply_lemma_hyps:\n{after}"
 
                   if after.isEmpty then
-                    logInfo "🎉 SUCCESS: isolated goal solved. Restoring remaining goals."
+                    --logInfo "🎉 SUCCESS: isolated goal solved. Restoring remaining goals."
                     setGoals ( [g_one ] ++ rest_rev )
                     progress := true
                     handled := true
@@ -961,7 +966,7 @@ elab_rules : tactic
                     --logInfo "❌ try_apply_lemma_hyps did NOT solve the isolated goal"
                     throwError m! "try_apply failed {after}"
             catch e =>
-                logInfo m! "Could not remove mod {e.toMessageData}?"
+                --logInfo m! "Could not remove mod {e.toMessageData}?"
                 modLoop := false
 
       --   evalTactic (← `(tactic| try simp))
@@ -983,11 +988,11 @@ elab_rules : tactic
       if progress then
           --setGoals (updatedGoalsReversed.reverse ++ goalQueue.dList ++ goalQueue.eList.reverse)
           --progress := false
-          logInfo m! "but not here?"
+          --logInfo m! "but not here?"
           continue
-      logInfo m!"umm..."
+     -- logInfo m!"umm..."
       let loopBodyResult ← (ContT.run · pure) $ MonadCont.callCC $ fun loopBodyReturn => do
-        logInfo m!"here?"
+       -- logInfo m!"here?"
         if args.size > 3 then
           let g ← getMainGoal
           let goalType ← g.getType
@@ -1003,9 +1008,11 @@ elab_rules : tactic
           -- - First check that only 2 variables exist & a subtraction is involved
           -- then make sure all variables are bounded <= 1
           -- TODO: this should be check to containsSUb OR both sides are applications
-          --logInfo m! "{terms.size}"
+          --logInfo m! "TERMS{terms.toList}"
+          --logInfo m! "TERMS{bothArgsAreApps instantiatedGoalType}"
           if ((terms.size = 2))  && ( (← containsSub instantiatedGoalType) ||  bothArgsAreApps instantiatedGoalType ) then
              --try
+             --logInfo m! "HASSDSA"
              caseByCaseOnTwoVariables loopBodyReturn g hyps terms
             -- catch _ => pure ()
           --try to apply Lean's range analysis lemmas
@@ -1122,33 +1129,34 @@ elab_rules : tactic
 --   try_apply_lemma_hyps []
 
 
--- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
--- instance : Fact (Nat.Prime ffff0) := by sorry
--- instance : Fact (NeZero ffff0) := by sorry
--- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
--- variable (fresh_pf1_is_zero : FF0)
--- variable (fresh_pf0_is_zero_inv : FF0)
--- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+instance : Fact (Nat.Prime ffff0) := by sorry
+instance : Fact (NeZero ffff0) := by sorry
+instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+variable (x : FF0)
+variable (y : FF0)
+ abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
 
 -- abbrev ff := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 
 
--- instance : Fact (Nat.Prime ff) := by sorry
--- instance : Fact (NeZero ff) := by sorry
+-- -- instance : Fact (Nat.Prime ff) := by sorry
+-- -- instance : Fact (NeZero ff) := by sorry
 
 
--- example {b a : BitVec 1} : (if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[1] = true then
--- --       if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[1] = true then 1 else 0
--- --     else 0) %
--- --     52435875175126190479447740508185965837690552500527637822603658699938581184513 <
--- --   4 := by
--- --  try_apply_lemma_hyps []
+-- -- example {b a : BitVec 1} : (if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[1] = true then
+-- -- --       if (BitVec.setWidth 2 b + 1#2 - BitVec.setWidth 2 a)[1] = true then 1 else 0
+-- -- --     else 0) %
+-- -- --     52435875175126190479447740508185965837690552500527637822603658699938581184513 <
+-- -- --   4 := by
+-- -- --  try_apply_lemma_hyps []
 
--- example {b a : BitVec 1} :   ( (b.toNat : FF0) +  - (a.toNat: FF0)+1).val ≤ 2 ^ 2 := by
+-- example {x y:  FF0}  (fv1 fv2 : Vector FF0 8)  (h1: ZMod.val fv2[7] ≤ 1) (h2: ZMod.val fv1[7] ≤ 1) : ZMod.val (fv1[7] * fv2[7]) ≤ ZMod.val (fv1[7] + fv2[7])  := by
 -- --ry valify
 -- --simp [Nat.mul_assoc]
 -- --rw [ZMod.val_sub]
--- try_apply_lemma_hyps []
+-- try_apply_lemma_hyps [h1, h2]
+
 
 -- example {b a:BitVec 1} : ZMod.val (Nat.cast b.toNat : FF0)   < 10 := by
 -- simp
@@ -1164,7 +1172,7 @@ elab_rules : tactic
 --   try_apply_lemma_hyps []
 
 
--- example : 64 < 52435875175126190479447740508185965837690552500527637822603658699938581184513 := by
+-- example : 64 < 5243ss5875175126190479447740508185965837690552500527637822603658699938581184513 := by
 --  try_apply_lemma_hyps []
 
 
