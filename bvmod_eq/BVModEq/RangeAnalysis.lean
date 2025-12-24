@@ -640,9 +640,57 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
   let applyThisLemma := applyThisLemma loopBodyReturn g goalType leftSide
   applyThisLemma lt
 
+-- lemma Nat.add_ge_add{a b c d : Nat} (h₁ : a >= b) (h₂ : c >= d) :
+-- a + c >= b + d := by sorry
+
+-- example (x y: Nat) (h1: x <= 1) (h2: y <= 1):  (y+x) <= 2 := by
+--   apply Nat.le_trans
+--   apply Nat.add_le_add
+--   apply h2
+--   apply h1
+--   decide
+
+
+-- example (x y: Nat) (h1: x <= 1) (h2: y <= 1):  (y*x) <= (y+x) := by
+--   apply Nat.le_trans
+--   apply Nat.mul_le_mul
+--   apply h2
+--   apply h1
+--   apply Nat.le_trans
+--   swap
+--   apply Nat.add_le_add
+--   apply Nat.zero_le
+--   apply Nat.zero_le
+--   sorry
 
 
 
+-- example (x y: Nat) (h1: x <= 1) (h2: y <= 1):  1 <= (y+x) := by
+--   apply Nat.le_trans
+--   swap
+--   apply Nat.add_le_add
+--   apply Nat.mul_le_mul
+--   apply h2
+--   apply h1
+--   apply Nat.le_trans
+--   swap
+--   apply Nat.add_le_add
+--   apply Nat.zero_le
+--   apply Nat.zero_le
+--   sorry
+  --sorry
+  --apply Nat.add_le_add
+  --apply Nat.zero_le
+  --apply Nat.zero_le
+
+
+
+  -- apply Nat.add_le_add
+  -- apply h2
+  -- apply h1
+  -- decide
+
+  -- --apply Nat.lt_of_le_of_lt
 
 def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
   (terms : NameSet) (g : MVarId) (mainGoalType : Expr) (hyps : List Name)
