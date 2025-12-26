@@ -369,7 +369,7 @@ def collectFromContext : TacticM (Array (Nat × Expr × Expr)) := do
     let mut out : Array (Nat × Expr × Expr) := #[]
     --logInfo m!"Starting {goalTy}"
     out := out ++ (← collectMatches (goalTy))
-    logInfo m!"GOT {out}"
+    --logInfo m!"GOT {out}"
     let lctx ← getLCtx
     --logInfo "=== RAW HYP TYPES ==="
     for decl in lctx do
@@ -435,7 +435,7 @@ elab_rules : tactic
   let hyps := (ids.getElems.map (·.getId)).toList
   let pairsArr ← collectFromContext
   let pairs := pairsArr.toList
-  logInfo m!"Detected pairs (width, expr): {pairs}"
+  --logInfo m!"Detected pairs (width, expr): {pairs}"
 
   -- Group widths by underlying variable, keyed by FVarId
   let mut groups : List (Name  × Expr × List Nat) := []
@@ -542,7 +542,8 @@ elab_rules : tactic
         -- evalTactic (← `(tactic| simp at $(mkIdent c):ident))
 
         catch e =>
-          logInfo m!"{e.toMessageData}"
+          pure ()
+          --logInfo m!"{e.toMessageData}"
 
     goal ← getMainGoal
 
@@ -822,7 +823,7 @@ elab_rules : tactic
     CalcBitWidth decl.type ids
   let bitsize := ceilLog2 (Nat.max m 4)
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
-  logInfo m!"{bitsize}"
+  --logInfo m!"{bitsize}"
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx] at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_leq_iff $bitsizeStx] at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
@@ -1022,7 +1023,7 @@ elab_rules : tactic
   let m <- CalcBitWidth (<-goals[0]!.getType) ids
   let bitsize := ceilLog2 (Nat.max m 4)
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
-  logInfo m!"BIT SIZE {bitsize} with {m}"
+  --logInfo m!"BIT SIZE {bitsize} with {m}"
   --  --loopUntilDone flag
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
@@ -1260,7 +1261,8 @@ def smartTranslateOne
 
               return (some newName, some h1, none)
             catch e =>
-                logInfo m!"{e.toMessageData}"
+                pure ()
+                --logInfo m!"{e.toMessageData}"
 
 
        return (none, none, some h)
@@ -1395,7 +1397,7 @@ elab_rules : tactic
   catch _ =>
     --evalTactic (← `(tactic| autoCastBits))
     --let hs <- addZModValBounds 256
-    logInfo m!"{changed}"
+   -- logInfo m!"{changed}"
     evalTactic (← `(tactic| autoCastBits [$[$changed],*]))
     let mut rw := true
     while (rw) do
@@ -1540,38 +1542,80 @@ abbrev ff := 5243587517512619047944774050818596583769055250052763782260365869993
 -- instance IsThisTrue: SubNegMonoid (ZMod ff) :=
 --   inferInstance
 
-def OR_16  : Subtable FF0 16 :=
-  subtableFromMLE (fun x => 0 + ((1*((x[7] + x[15] - x[7]*x[15])))) + 2*(x[6] + x[14] - x[6]*x[14]) + 4*(x[5] + x[13] - x[5]*x[13]) + 8*(x[4] + x[12] - x[4]*x[12]) + 16*(x[3] + x[11] - x[3]*x[11]) + 32*(x[2] + x[10] - x[2]*x[10]) + 64*(x[1] + x[9] - x[1]*x[9]) + 128*(x[0] + x[8] - x[0]*x[8]))
+-- example (x y: FF0) (h1: x.val ≤ 1) (h2: x.val ≤ 2) : (x.val + y.val - x.val * y.val >= 0 ) := by
+--  ring_nf
 
--- #check FF0
+-- def OR_16  : Subtable FF0 16 :=
+--   subtableFromMLE (fun x => 0 + ((1*((x[7] + x[15] - x[7]*x[15])))) + 2*(x[6] + x[14] - x[6]*x[14]) + 4*(x[5] + x[13] - x[5]*x[13]) + 8*(x[4] + x[12] - x[4]*x[12]) + 16*(x[3] + x[11] - x[3]*x[11]) + 32*(x[2] + x[10] - x[2]*x[10]) + 64*(x[1] + x[9] - x[1]*x[9]) + 128*(x[0] + x[8] - x[0]*x[8]))
 
-lemma or_mle_one_chunk(bv1 bv2 : BitVec 8) (fv1 fv2 : Vector FF0 8) :
-  some bvoutput = BVModEq.map_f_to_bv 8 foutput ->
-   some (BVModEq.bool_to_bv 8 bv1[7])  = BVModEq.map_f_to_bv 8 fv1[0]  ->
-   some (BVModEq.bool_to_bv 8 bv1[6]) = BVModEq.map_f_to_bv 8 fv1[1]  ->
-   some (BVModEq.bool_to_bv 8 bv1[5]) = BVModEq.map_f_to_bv 8 fv1[2]  ->
-   some (BVModEq.bool_to_bv 8 bv1[4]) = BVModEq.map_f_to_bv 8 fv1[3]  ->
-   some (BVModEq.bool_to_bv 8 bv1[3]) = BVModEq.map_f_to_bv 8 fv1[4]  ->
-  some (BVModEq.bool_to_bv 8 bv1[2]) = BVModEq.map_f_to_bv 8 fv1[5]  ->
-   some (BVModEq.bool_to_bv 8 bv1[1]) =BVModEq.map_f_to_bv 8 fv1[6]  ->
-   some (BVModEq.bool_to_bv 8  bv1[0]) = BVModEq.map_f_to_bv 8 fv1[7]  ->
-  some (BVModEq.bool_to_bv 8 bv2[7]) = BVModEq.map_f_to_bv 8 fv2[0]  ->
-  some (BVModEq.bool_to_bv 8 bv2[6]) = BVModEq.map_f_to_bv 8 fv2[1]  ->
-  some (BVModEq.bool_to_bv 8 bv2[5]) = BVModEq.map_f_to_bv 8 fv2[2]  ->
-  some (BVModEq.bool_to_bv 8 bv2[4]) = BVModEq.map_f_to_bv 8 fv2[3]  ->
-  some (BVModEq.bool_to_bv 8 bv2[3]) = BVModEq.map_f_to_bv 8 fv2[4]  ->
-  some (BVModEq.bool_to_bv 8 bv2[2]) = BVModEq.map_f_to_bv 8 fv2[5]  ->
-  some (BVModEq.bool_to_bv 8 bv2[1]) = BVModEq.map_f_to_bv 8 fv2[6]  ->
-  some (BVModEq.bool_to_bv 8 bv2[0]) = BVModEq.map_f_to_bv 8 fv2[7]  ->
-  (bvoutput = (BitVec.or bv1  bv2 ))
-  =
-  (foutput = evalSubtable OR_16 (Vector.append fv1 fv2))
- := by
-  unfold OR_16
-  unfold evalSubtable
-  unfold subtableFromMLE
-  unfold Vector.append
-  translate_all false
+-- -- #check FF0
+
+-- lemma or_mle_one_chunk(bv1 bv2 : BitVec 8) (fv1 fv2 : Vector FF0 8) :
+--   some bvoutput = BVModEq.map_f_to_bv 8 foutput ->
+--    some (BVModEq.bool_to_bv 8 bv1[7])  = BVModEq.map_f_to_bv 8 fv1[0]  ->
+--    some (BVModEq.bool_to_bv 8 bv1[6]) = BVModEq.map_f_to_bv 8 fv1[1]  ->
+--    some (BVModEq.bool_to_bv 8 bv1[5]) = BVModEq.map_f_to_bv 8 fv1[2]  ->
+--    some (BVModEq.bool_to_bv 8 bv1[4]) = BVModEq.map_f_to_bv 8 fv1[3]  ->
+--    some (BVModEq.bool_to_bv 8 bv1[3]) = BVModEq.map_f_to_bv 8 fv1[4]  ->
+--   some (BVModEq.bool_to_bv 8 bv1[2]) = BVModEq.map_f_to_bv 8 fv1[5]  ->
+--    some (BVModEq.bool_to_bv 8 bv1[1]) =BVModEq.map_f_to_bv 8 fv1[6]  ->
+--    some (BVModEq.bool_to_bv 8  bv1[0]) = BVModEq.map_f_to_bv 8 fv1[7]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[7]) = BVModEq.map_f_to_bv 8 fv2[0]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[6]) = BVModEq.map_f_to_bv 8 fv2[1]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[5]) = BVModEq.map_f_to_bv 8 fv2[2]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[4]) = BVModEq.map_f_to_bv 8 fv2[3]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[3]) = BVModEq.map_f_to_bv 8 fv2[4]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[2]) = BVModEq.map_f_to_bv 8 fv2[5]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[1]) = BVModEq.map_f_to_bv 8 fv2[6]  ->
+--   some (BVModEq.bool_to_bv 8 bv2[0]) = BVModEq.map_f_to_bv 8 fv2[7]  ->
+--   (bvoutput = (BitVec.or bv1  bv2 ))
+--   =
+--   (foutput = evalSubtable OR_16 (Vector.append fv1 fv2))
+--  := by
+--   unfold OR_16
+--   unfold evalSubtable
+--   unfold subtableFromMLE
+--   unfold Vector.append
+--   --have h:  foutput.val < 256 := by sorry
+
+--   translate_all false
+--   sorry
+--   simp
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   rw [Nat.mod_eq_of_lt]
+--   --ring_nf
+--   ring_nf
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+--   omega
+
+
+
 
 
 

@@ -1,6 +1,8 @@
 -- AUTO-GENERATED — DO NOT EDIT
+import BVModEq.TranslateAll
+set_option maxRecDepth 1048576
 
-
+set_option maxHeartbeats  20000000000000000000
 def OR_7  : Subtable FF0 14 :=
   subtableFromMLE (fun x => 1*(x[13] + x[6] - x[13]*x[6]) + 2*(x[12] + x[5] - x[12]*x[5]) + 4*(x[11] + x[4] - x[11]*x[4]) + 8*(x[10] + x[3] - x[10]*x[3]) + 16*(x[9] + x[2] - x[9]*x[2]) + 32*(x[8] + x[1] - x[8]*x[1]) + 64*(x[7] + x[0] - x[7]*x[0]))
 
