@@ -4,8 +4,16 @@ set_option maxRecDepth 1048576
 
 set_option maxHeartbeats  20000000000000000000
 
+abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+instance : Fact (Nat.Prime ffff0) := by sorry
+instance : Fact (NeZero ffff0) := by sorry
+instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
 def OR_2  : Subtable FF0 4 :=
   subtableFromMLE (fun x => 1*(x[3] + x[1] - x[3]*x[1]) + 2*(x[2] + x[0] - x[2]*x[0]))
+
+abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+
 
 lemma or_mle_2_chunk
   (bv1 bv2 : BitVec 2)
