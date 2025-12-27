@@ -1,0 +1,93 @@
+(set-logic ALL)
+(set-option :produce-models true)
+(define-sort FF () (_ FiniteField 52435875175126190479447740508185965837690552500527637822603658699938581184513))
+(declare-fun one () FF)
+(declare-fun zero () FF)
+(declare-fun neg_one () FF)
+(assert (= one #f1m52435875175126190479447740508185965837690552500527637822603658699938581184513))
+(assert (= zero #f0m52435875175126190479447740508185965837690552500527637822603658699938581184513))
+(assert (= neg_one #f52435875175126190479447740508185965837690552500527637822603658699938581184512m52435875175126190479447740508185965837690552500527637822603658699938581184513))
+
+(declare-fun a () (_ BitVec 6))
+(declare-fun b () (_ BitVec 6))
+(declare-fun out_bv () (_ BitVec 6))
+
+(declare-fun x0 () FF)
+(declare-fun x1 () FF)
+(declare-fun x2 () FF)
+(declare-fun x3 () FF)
+(declare-fun x4 () FF)
+(declare-fun x5 () FF)
+
+(declare-fun y0 () FF)
+(declare-fun y1 () FF)
+(declare-fun y2 () FF)
+(declare-fun y3 () FF)
+(declare-fun y4 () FF)
+(declare-fun y5 () FF)
+
+(declare-fun out0 () FF)
+(declare-fun out1 () FF)
+(declare-fun out2 () FF)
+(declare-fun out3 () FF)
+(declare-fun out4 () FF)
+(declare-fun out5 () FF)
+
+(declare-fun out_ff () FF)
+
+;; ===============================
+;; Input BV → FF (x0 is MSB, x{B-1} is LSB, matching your 2-bit file)
+;; ===============================
+(assert (= x0 (ite (= ((_ extract 5 5) a) #b1) one zero)))
+(assert (= x1 (ite (= ((_ extract 4 4) a) #b1) one zero)))
+(assert (= x2 (ite (= ((_ extract 3 3) a) #b1) one zero)))
+(assert (= x3 (ite (= ((_ extract 2 2) a) #b1) one zero)))
+(assert (= x4 (ite (= ((_ extract 1 1) a) #b1) one zero)))
+(assert (= x5 (ite (= ((_ extract 0 0) a) #b1) one zero)))
+(assert (= y0 (ite (= ((_ extract 5 5) b) #b1) one zero)))
+(assert (= y1 (ite (= ((_ extract 4 4) b) #b1) one zero)))
+(assert (= y2 (ite (= ((_ extract 3 3) b) #b1) one zero)))
+(assert (= y3 (ite (= ((_ extract 2 2) b) #b1) one zero)))
+(assert (= y4 (ite (= ((_ extract 1 1) b) #b1) one zero)))
+(assert (= y5 (ite (= ((_ extract 0 0) b) #b1) one zero)))
+(assert (= out0 (ite (= ((_ extract 5 5) out_bv) #b1) one zero)))
+(assert (= out1 (ite (= ((_ extract 4 4) out_bv) #b1) one zero)))
+(assert (= out2 (ite (= ((_ extract 3 3) out_bv) #b1) one zero)))
+(assert (= out3 (ite (= ((_ extract 2 2) out_bv) #b1) one zero)))
+(assert (= out4 (ite (= ((_ extract 1 1) out_bv) #b1) one zero)))
+(assert (= out5 (ite (= ((_ extract 0 0) out_bv) #b1) one zero)))
+
+;; bitness constraints
+(assert (= x0 (ff.mul x0 x0)))
+(assert (= x1 (ff.mul x1 x1)))
+(assert (= x2 (ff.mul x2 x2)))
+(assert (= x3 (ff.mul x3 x3)))
+(assert (= x4 (ff.mul x4 x4)))
+(assert (= x5 (ff.mul x5 x5)))
+(assert (= y0 (ff.mul y0 y0)))
+(assert (= y1 (ff.mul y1 y1)))
+(assert (= y2 (ff.mul y2 y2)))
+(assert (= y3 (ff.mul y3 y3)))
+(assert (= y4 (ff.mul y4 y4)))
+(assert (= y5 (ff.mul y5 y5)))
+(assert (= out0 (ff.mul out0 out0)))
+(assert (= out1 (ff.mul out1 out1)))
+(assert (= out2 (ff.mul out2 out2)))
+(assert (= out3 (ff.mul out3 out3)))
+(assert (= out4 (ff.mul out4 out4)))
+(assert (= out5 (ff.mul out5 out5)))
+
+
+(define-fun OR_FF_6 (
+  (y5 FF) (x5 FF) (y4 FF) (x4 FF) (y3 FF) (x3 FF) (y2 FF) (x2 FF) (y1 FF) (x1 FF) (y0 FF) (x0 FF)) FF
+  (ff.add (ff.add (ff.add (ff.add (ff.add (ff.mul #f1m52435875175126190479447740508185965837690552500527637822603658699938581184513 (ff.add y5 x5 (ff.mul neg_one (ff.mul y5 x5)))) (ff.mul #f2m52435875175126190479447740508185965837690552500527637822603658699938581184513 (ff.add y4 x4 (ff.mul neg_one (ff.mul y4 x4))))) (ff.mul #f4m52435875175126190479447740508185965837690552500527637822603658699938581184513 (ff.add y3 x3 (ff.mul neg_one (ff.mul y3 x3))))) (ff.mul #f8m52435875175126190479447740508185965837690552500527637822603658699938581184513 (ff.add y2 x2 (ff.mul neg_one (ff.mul y2 x2))))) (ff.mul #f16m52435875175126190479447740508185965837690552500527637822603658699938581184513 (ff.add y1 x1 (ff.mul neg_one (ff.mul y1 x1))))) (ff.mul #f32m52435875175126190479447740508185965837690552500527637822603658699938581184513 (ff.add y0 x0 (ff.mul neg_one (ff.mul y0 x0)))))
+)
+
+(assert (= out_ff (OR_FF_6 y5 x5 y4 x4 y3 x3 y2 x2 y1 x1 y0 x0)))
+
+(assert (= out_bv (bvor a b)))
+
+;; Bit decomposition link (same shape as your 2-bit: out_ff = out_{LSB} + 2*out_{next} + ...)
+(assert (not (= out_ff (ff.add (ff.add (ff.add (ff.add (ff.add (ff.mul #f1m52435875175126190479447740508185965837690552500527637822603658699938581184513 out5) (ff.mul #f2m52435875175126190479447740508185965837690552500527637822603658699938581184513 out4)) (ff.mul #f4m52435875175126190479447740508185965837690552500527637822603658699938581184513 out3)) (ff.mul #f8m52435875175126190479447740508185965837690552500527637822603658699938581184513 out2)) (ff.mul #f16m52435875175126190479447740508185965837690552500527637822603658699938581184513 out1)) (ff.mul #f32m52435875175126190479447740508185965837690552500527637822603658699938581184513 out0)))))
+
+(check-sat)
