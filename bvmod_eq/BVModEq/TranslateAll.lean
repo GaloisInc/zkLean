@@ -1424,44 +1424,44 @@ elab_rules : tactic
            -- evalTactic (← `(tactic| try simp only [BitVec.setWidth] at $(mkIdent hyp.getId):ident))
       catch _ =>
         rw := false
-    --try
-      evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-    -- catch _ =>
-    --   rw := false
-    --   pure ()
-      -- THIS IS NEEDED FOR JOLT BUT NOT CIRC WE SHOULD FIND A WAY TO ABSTRACT THIS
-    --   let mut index :=0
-    --   let fv1T : TSyntax `term := (← termFor `fv1)
-    --   let fv2T : TSyntax `term := (← termFor `fv2)
-    --   while index < collected.size/2 do
+  --   --try
+     evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+  --   -- catch _ =>
+  --   --   rw := false
+  --   --   pure ()
+  --     -- THIS IS NEEDED FOR JOLT BUT NOT CIRC WE SHOULD FIND A WAY TO ABSTRACT THIS
+  --   --   let mut index :=0
+  --   --   let fv1T : TSyntax `term := (← termFor `fv1)
+  --   --   let fv2T : TSyntax `term := (← termFor `fv2)
+  --   --   while index < collected.size/2 do
 
-    --     -- names for the bound and its equality
-    --     let idName  := Name.mkSimple s!"b0_{index}"
+  --   --     -- names for the bound and its equality
+  --   --     let idName  := Name.mkSimple s!"b0_{index}"
 
-    --     -- identifiers/syntax nodes
-    --     let idSyn   : TSyntax `ident := mkIdent idName
-    --     let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+  --   --     -- identifiers/syntax nodes
+  --   --     let idSyn   : TSyntax `ident := mkIdent idName
+  --   --     let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
 
-    --     -- safest access: .get! (parses reliably inside quotations)
-    --     evalTactic (← `(tactic|
-    --       set $idSyn := $fv1T[$idxSyn]
-    --     ))
-    --     index := index + 1
-    --   index := 0
-    --   while index < collected.size/2 do
-    --     -- names for the bound and its equality
-    --     let idName  := Name.mkSimple s!"b1_{index}"
+  --   --     -- safest access: .get! (parses reliably inside quotations)
+  --   --     evalTactic (← `(tactic|
+  --   --       set $idSyn := $fv1T[$idxSyn]
+  --   --     ))
+  --   --     index := index + 1
+  --   --   index := 0
+  --   --   while index < collected.size/2 do
+  --   --     -- names for the bound and its equality
+  --   --     let idName  := Name.mkSimple s!"b1_{index}"
 
-    --     -- identifiers/syntax nodes
-    --     let idSyn   : TSyntax `ident := mkIdent idName
-    --     let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+  --   --     -- identifiers/syntax nodes
+  --   --     let idSyn   : TSyntax `ident := mkIdent idName
+  --   --     let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
 
-    --     -- safest access: .get! (parses reliably inside quotations)
-    --     evalTactic (← `(tactic|
-    --       set $idSyn := $fv2T[$idxSyn]
-    --     ))
-    --     index := index + 1
-    --evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+  --   --     -- safest access: .get! (parses reliably inside quotations)
+  --   --     evalTactic (← `(tactic|
+  --   --       set $idSyn := $fv2T[$idxSyn]
+  --   --     ))
+  --   --     index := index + 1
+  --   --evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
 
   -- -- -- -- --logInfo m! "Collected {collected}"
   evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
@@ -1515,6 +1515,21 @@ elab_rules : tactic
  --try_apply_lemma_hyps [h0_1_1,h0_2_1]
 
  --bv_decide
+
+abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+instance : Fact (Nat.Prime ffff0) := by sorry
+instance : Fact (NeZero ffff0) := by sorry
+instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+variable (fresh_pf0_sum_bit0 : FF0)
+variable (b : BitVec 1)
+variable (a : BitVec 1)
+variable (fresh_pf1_sum_bit1 : FF0)
+lemma correct :
+((((((((fresh_pf0_sum_bit0) * (fresh_pf0_sum_bit0))) = (fresh_pf0_sum_bit0))) ∧ (((((fresh_pf1_sum_bit1) * (fresh_pf1_sum_bit1))) = (fresh_pf1_sum_bit1))) ∧ (((((fresh_pf0_sum_bit0) + (((fresh_pf1_sum_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (((BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  a) * (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  b)))))) → (((if (((BVModEq.bool_to_bv 1 (BitVec.mul a b)[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf0_sum_bit0)))))
+ := by
+   translate_all [] false
 
 
 
