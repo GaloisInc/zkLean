@@ -533,7 +533,7 @@ def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyR
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (stx : Syntax)
   : ContT LoopBodyResult TacticM Unit := do
   try
-    logInfo m!"WHY{stx} for {goalType}"
+    --logInfo m!"WHY{stx} for {goalType}"
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
   catch e =>
@@ -951,7 +951,7 @@ elab_rules : tactic
         updatedGoalsReversed := g :: updatedGoalsReversed
         continue
       setGoals [g] -- focus on one goal at a time
-      logInfo m! "GOAL {g}"
+      --logInfo m! "GOAL {g}"
       let goalType ← g.getType
       --logInfo m! "GOALS {<- getGoals}"
       -- first we try to apply hypothesis
@@ -1129,7 +1129,7 @@ elab_rules : tactic
  -- logInfo m! "{args[args.size-1]!} => {containsMVar args[args.size-1]!}"
             let unfolded := ← monadLift $ withTransparency .reducible (whnf args[2]!)
             let fn3 := unfolded.getAppFn
-            logInfo m! "{containsMVar instantiatedGoalType}"
+           -- logInfo m! "{containsMVar instantiatedGoalType}"
                match fn with
                   | ``LE.le =>
                     --if containsMVar instantiatedGoalType then
@@ -1147,7 +1147,7 @@ elab_rules : tactic
                           --|  ``HMod.hMod => applyThisLemma loopBodyReturn g instantiatedGoalType false modLemma
                           -- rfl is a place holder should be something else
                           | _ =>
-                              logInfo m! "rl here"
+                              --logInfo m! "rl here"
                               -- this is good we have zero variables we should do this
                               if containsMVar instantiatedGoalType then
                                 applyNatLeRefl2 loopBodyReturn g instantiatedGoalType false rfl
@@ -1155,7 +1155,7 @@ elab_rules : tactic
                                 pure ()
 
                         | _ =>
-                           logInfo m! "No rfl here! Wow"
+                           --logInfo m! "No rfl here! Wow"
                           if containsMVar instantiatedGoalType then
                               applyNatLeRefl2 loopBodyReturn g instantiatedGoalType false rfl
                           else
@@ -1226,10 +1226,10 @@ elab_rules : tactic
     --   catch _ => pure ()
 
 
- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
 
-lemma aaa1 {a b : BitVec 1} : (b.toNat: FF0).val ≤ ((a.toNat + 2) : FF0).val := by
-  try_apply_lemma_hyps []
+-- lemma aaa1 {a b : BitVec 1} : (b.toNat: FF0).val ≤ ((a.toNat + 2) : FF0).val := by
+--   try_apply_lemma_hyps []
 
 
   --evalTactic (← `(tactic| try apply Nat.le_refl; try simp))
