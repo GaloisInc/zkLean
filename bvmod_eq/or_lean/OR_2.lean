@@ -8,11 +8,12 @@ abbrev ffff0 := 5243587517512619047944774050818596583769055250052763782260365869
 instance : Fact (Nat.Prime ffff0) := by sorry
 instance : Fact (NeZero ffff0) := by sorry
 instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+
 
 def OR_2  : Subtable FF0 4 :=
   subtableFromMLE (fun x => 1*(x[3] + x[1] - x[3]*x[1]) + 2*(x[2] + x[0] - x[2]*x[0]))
 
-abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
 
 
 lemma or_mle_2_chunk

@@ -535,7 +535,7 @@ def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyR
       monadLift $ do evalTactic (← `(tactic| focus split_ifs with h <;> simp [*]))
       loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
     catch e =>
-      logInfo (Lean.Exception.toMessageData e)
+      --logInfo (Lean.Exception.toMessageData e)
       pure ()
 
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (stx : Syntax)
@@ -546,7 +546,7 @@ def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
   catch e =>
 
      --pure ()
-    logInfo (Lean.Exception.toMessageData e)
+    --logInfo (Lean.Exception.toMessageData e)
     pure ()
 
 def applyNatLeReflInferSide
