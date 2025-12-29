@@ -943,7 +943,7 @@ partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) : TacticM U
       evalTactic (← `(tactic| set kc := $(ifSyn) with hc))
 
       -- Call your custom tactic on it
-      evalTactic (← `(tactic| translate_hypothesis hc [$hs,*] $flagStx ))
+      evalTactic (← `(tactic| translate_hypothesis hc [$hs,*] [] $flagStx ))
 
       -- -- Simplify the goal using this new equality
       evalTactic (← `(tactic| all_goals try simp [hc]))
@@ -1449,7 +1449,7 @@ elab_rules : tactic
   if after.isEmpty then
     return
   let tgt ← (← getMainGoal).getType
-
+  let tgt <- whnf tgt
   let (fn, args) := tgt.getAppFnArgs
   let bitblast :=
     match fn with
@@ -1478,8 +1478,9 @@ elab_rules : tactic
           catch _ =>
             rw := false
       --   --try
-       -- evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-
+        evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+    else
+      logInfo m!"NO BV DECIDE {fn}"
   --   -- catch _ =>
   --   --   rw := false
   --   --   pure ()
