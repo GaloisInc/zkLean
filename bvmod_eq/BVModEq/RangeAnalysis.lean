@@ -518,22 +518,29 @@ syntax (name := splitPropIf) "split_prop_if " term : tactic
 
 macro_rules
   | `(tactic| split_prop_if $p) =>
-      `(tactic| by_cases h : $p <;> simp [h] at *)
+      `(tactic|  by_cases h : $p <;> try simp [h] at *)
 
 def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
   let decTy ← Meta.inferType cond0
-  if (decTy.getAppApps.size != 0) then
-    let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
-    monadLift $ do evalTactic (← `(tactic| split_prop_if $condSyn))
-    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
-  else
-    monadLift $ do evalTactic (← `(tactic| split_ifs))
-    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+  try
+    if (decTy.getAppApps.size != 0) then
+      let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
+      monadLift $ do evalTactic (← `(tactic| split_prop_if $condSyn))
+      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+    else
+      monadLift $ do evalTactic (← `(tactic| split_ifs))
+      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+  catch _ =>
+    try
+      monadLift $ do evalTactic (← `(tactic| focus split_ifs with h <;> simp [*]))
+      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+    catch e =>
+      logInfo (Lean.Exception.toMessageData e)
+      pure ()
 
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (stx : Syntax)
   : ContT LoopBodyResult TacticM Unit := do
   try
-    --logInfo m!"WHY{stx} for {goalType}"
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
   catch e =>
@@ -1228,14 +1235,30 @@ elab_rules : tactic
 
 -- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
 
--- lemma aaa1 {a b : BitVec 1} : (b.toNat: FF0).val ≤ ((a.toNat + 2) : FF0).val := by
---   try_apply_lemma_hyps []
+lemma aaa1 {a  : BitVec 3} :(((if a[0] = true then 1 else 0) + if a[1] = true then 2 else 0) + if a[2] = true then 4 else 0) <
+  52435875175126190479447740508185965837690552500527637822603658699938581184 := by
+  try_apply_lemma_hyps []
 
 
   --evalTactic (← `(tactic| try apply Nat.le_refl; try simp))
 --   try_apply_lemma_hyps []
 
+-- example hello {a  : BitVec 3} : (if a[0] = true then 1 else 0) <100 := by
+--   --  try_apply_lemma_hyps []
+--   apply Nat.lt_of_le_of_lt
+--   split_ifs with h
+  -- by_cases h : (a[0] = true)
+  -- simp [h]
+  -- try swap
+  -- simp [h]
 
+
+
+
+
+-- macro_rules
+--   | `(tactic| split_prop_if $p) =>
+--       `(tactic| by_cases h : $p <;> try simp [h] at *)
 -- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 -- instance : Fact (Nat.Prime ffff0) := by sorry
 -- instance : Fact (NeZero ffff0) := by sorry
