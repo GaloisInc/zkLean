@@ -961,15 +961,16 @@ partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) (count: Nat
 
         -- Turn Expr into Syntax so we can splice it
         let ifSyn ← PrettyPrinter.delab if_comp
-        evalTactic (← `(tactic| have rhs : Bool := $(ifSyn)))
+        evalTactic (← `(tactic| set kc := $(ifSyn) with hc))
 
-        -- Call your custom tactic on it
-        evalTactic (← `(tactic| translate_hypothesis kc [$hs,*] [] $flagStx ))
+      -- Call your custom tactic on it
+        evalTactic (← `(tactic| translate_hypothesis hc [$hs,*] [] $flagStx ))
 
-      -- -- -- -- -- Simplify the goal using this new equality
-      evalTactic (← `(tactic| all_goals try simp [hc]))
-      -- -- -- -- Recurse on updated goal
-      loopUntilDone flag hs (count + 1)
+          -- -- Simplify the goal using this new equality
+        evalTactic (← `(tactic| all_goals try simp [hc]))
+
+          -- -- Recurse on updated goal
+        loopUntilDone flag hs (count +1)
 
 @[tactic translateGoal]
 elab_rules : tactic
