@@ -321,6 +321,7 @@ structure LoopBodyResult where
   madeProgress : Bool
   goals : List MVarId
   leftSide: Bool
+  stopCompletely : Bool
 
 def LoopBodyLabel := MonadCont.Label LoopBodyResult (ContT LoopBodyResult TacticM) Unit
 
@@ -338,7 +339,7 @@ def handleIfMux (loopBodyReturn : LoopBodyLabel) (g : MVarId) (args : Array Expr
     setGoals [pr.mvarId!, gWithHyp]
     didMux
     let MyGoals <- getGoals
-    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := MyGoals, leftSide := false }
+    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := MyGoals, leftSide := false, stopCompletely := false }
   | _ => return ()
 
 
@@ -494,7 +495,7 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
           logInfo m!"➖ elim2 modified goal {g}, but did not fully solve it"
         else
           --logInfo m!"HUH"
-          loopBodyReturn.apply { didMux := false, madeProgress := true, goals := [g], leftSide:= false }
+          loopBodyReturn.apply { didMux := false, madeProgress := true, goals := [g], leftSide:= false, stopCompletely := false }
       else
          --logInfo m!"HUH11"
          return ()
@@ -506,10 +507,10 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
         if ← g.isAssigned then
           if (← getUnsolvedGoals).contains g then
             --logInfo m!"➖ elim2 modified goal {g}, but did not fully solve it"
-            loopBodyReturn.apply { didMux := false, madeProgress := true, goals := [g], leftSide:= false }
+            loopBodyReturn.apply { didMux := false, madeProgress := true, goals := [g], leftSide:= false, stopCompletely:= false }
           else
            -- logInfo m!"HUH"
-            loopBodyReturn.apply { didMux := false, madeProgress := true, goals := newGoals, leftSide:= false }
+            loopBodyReturn.apply { didMux := false, madeProgress := true, goals := newGoals, leftSide:= false, stopCompletely:= false }
       else
          --logInfo m!"{m}"
          return ()
@@ -526,14 +527,14 @@ def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyR
     if (decTy.getAppApps.size != 0) then
       let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
       monadLift $ do evalTactic (← `(tactic| split_prop_if $condSyn))
-      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false }
     else
       monadLift $ do evalTactic (← `(tactic| split_ifs))
-      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false }
   catch _ =>
     try
       monadLift $ do evalTactic (← `(tactic| focus split_ifs with h <;> simp [*]))
-      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false }
+      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false }
     catch e =>
       --logInfo (Lean.Exception.toMessageData e)
       pure ()
@@ -542,7 +543,7 @@ def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
   : ContT LoopBodyResult TacticM Unit := do
   try
     let subgoals ← g.apply (← elabTerm stx goalType)
-    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
+    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide, stopCompletely:= false }
   catch e =>
 
      --pure ()
@@ -595,7 +596,7 @@ def applyNatLeRefl2  (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : E
 
           | _ =>  throwError m!"not a Nat ≤"
       | _ => throwError m!"not a Nat ≤"
-    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide }
+    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide, stopCompletely:= false }
   catch e =>
     applyThisLemma loopBodyReturn g goalType leftSide stx
 
@@ -613,7 +614,7 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
         g.apply (mkFVar decl.fvarId)
       -- Note: `return` below makes sure we end the loop after jumping to the
       -- continuation
-      return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
+      return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false, stopCompletely:= false})
       catch _err => pure ()
     try
     --   let ok ← monadLift <| g.withContext do
@@ -643,19 +644,19 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
       --monadLift $ do evalTactic (← `(tactic| try rw [BVModEq.bool_to_bv] at $hypSyn))
       monadLift $ do evalTactic  (← `(tactic| simp [← $hypSyn] ))
       let subgoals ← getGoals
-      return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
+      return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false, stopCompletely:= false})
 
     catch _ => pure ()
   try
        --logInfo m!"and we did this?"
        monadLift $ do evalTactic  (← `(tactic| valify [] ))
        let subgoals ← getGoals
-       return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
+       return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false, stopCompletely:= false})
   catch e =>
       try
          monadLift $ do evalTactic  (← `(tactic| simp))
          let subgoals ← getGoals
-         return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false})
+         return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false, stopCompletely:= false})
       catch e =>
       --logInfo m!"valify failed?"
       logInfo m!"{e.toMessageData}"
@@ -935,11 +936,15 @@ elab_rules : tactic
       cont := false
   evalTactic (← `(tactic| try all_goals simp [Nat.mul_assoc]))
   let mut did_mux := false
+  let mut stop_completely := false
   -- as long as we are making progress then continue
   count  := 0
   while (progress ) do
     --logInfo m!"we get here?"
     count := count + 1
+    if stop_completely then
+      progress := false
+      return
     if did_mux then do
       --logInfo m! "We are post did mux"
       didMux
@@ -1179,13 +1184,15 @@ elab_rules : tactic
             --findAndApplyRangeAnalysisLemma loopBodyReturn terms g instantiatedGoalType hyps
 
         -- if other techniques did not work try decide
-        try
-          monadLift $ do evalTactic (← `(tactic| decide))
-          --logInfo m! "Issue here!!"
-          if ← g.isAssigned then
-            --logInfo m!"✅ Fully solved goal using decide {goalType}"
-            return { didMux := false, madeProgress := true, goals := [g] , leftSide := false}
-        catch _err => pure ()
+        if (terms.size = 0) then
+          try
+            monadLift $ do evalTactic (← `(tactic| decide))
+            --logInfo m! "Issue here!!"
+            if ← g.isAssigned then
+              --logInfo m!"✅ Fully solved goal using decide {goalType}"
+              return { didMux := false, madeProgress := true, goals := [g] , leftSide := false, stopCompletely:= false}
+          catch _err =>
+              return { didMux := false, madeProgress := false, goals := [g] , leftSide := false, stopCompletely:= true}
         -- last shot try simp
         --  try
         --   monadLift $ do evalTactic (← `(tactic| simp))
@@ -1195,8 +1202,9 @@ elab_rules : tactic
         --     return { didMux := false, madeProgress := true, goals := gs }
         -- catch _err => pure ()
         -- if we made it here, nothing worked
-        return { didMux := false, madeProgress := false, goals := [g], leftSide:=false }
+        return { didMux := false, madeProgress := false, goals := [g], leftSide:=false, stopCompletely:= false }
       if loopBodyResult.didMux then did_mux := true
+      if loopBodyResult.stopCompletely then stop_completely := true
       if loopBodyResult.madeProgress then do
         handled := true; progress := true
       if loopBodyResult.leftSide && !did_mux then
@@ -1231,13 +1239,27 @@ elab_rules : tactic
     --     --handled := true; progress := true
     --     progress:= true
     --   catch _ => pure ()
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+--  abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+
+-- lemma aaa1 {a b c : BitVec 3} : ((if b[0] = true then
+--           ((if a[1] = true then 1 else 0) + if a[0] = true then (2:FF0) else 0) * 2 -
+--             ((if a[1] = true then 1 else 0) + if a[0] = true then 2 else 0)
+--         else 0) +
+--         ((if a[1] = true then 1 else 0) + if a[0] = true then 2 else 0) +
+--       if a[1] = true then
+--         ((if b[0] = true then (if a[1] = true then 2 else 0) - if a[1] = true then 1 else 0 else 0) +
+--             if a[1] = true then 1 else 0) +
+--           52435875175126190479447740508185965837690552500527637822603658699938581184512
+--       else 0).val ≤
+--   (if a[1] = true then (3 : FF0) else 0).val :=by
+--   try_apply_lemma_hyps []
 
 
--- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
-
-lemma aaa1 {a  : BitVec 3} :(((if a[0] = true then 1 else 0) + if a[1] = true then 2 else 0) + if a[2] = true then 4 else 0) <
-  52435875175126190479447740508185965837690552500527637822603658699938581184 := by
-  try_apply_lemma_hyps []
 
 
   --evalTactic (← `(tactic| try apply Nat.le_refl; try simp))

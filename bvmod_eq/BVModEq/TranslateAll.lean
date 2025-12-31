@@ -50,10 +50,22 @@ private def termFor (nm : Name) : TacticM (TSyntax `term) := withMainContext do
 
 
 partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat := do
+  let e ← withReducible <| whnf e
   let fn  := e.getAppFn
   let args := e.getAppArgs
-
-  match (← whnf e) with
+  if args.isEmpty then
+    let ty ← inferType e >>= whnf
+    match ty.getAppFnArgs with
+    | (``BitVec , #[w]) =>
+         --return (<- CalcBitWidth w hs)
+        match (← whnf w) with
+          | (Expr.lit (Literal.natVal n)) =>
+             return 2^n
+          | _ =>  logInfo m!"UGH"
+    --         logInfo m!"BitVec width not a numeral: {w}"
+    --         return 1
+    | _ =>pure ()
+  match e with
     | (Expr.lit (Literal.natVal n)) =>
        return n
     | _ => pure ()
@@ -120,7 +132,7 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
         throwError "wrong # args BitVec.ofNat"
     | ``BitVec.toNat =>
         if  args.size ≥ 2 then
-          return (<- CalcBitWidth args[args.size-2]! hs)
+          return (<- CalcBitWidth args[args.size-1]! hs)
         throwError "wrong # args BitVec.toNat"
         --return 10
     | ``Or =>
@@ -142,7 +154,7 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
     | ``Not =>
         return (<- CalcBitWidth args[args.size-1]! hs)
     | _ =>
-      logInfo m!"unsupported ap {name} with {args}"
+      logInfo m!"unsupported ap {name} with {args} and {args.size}"
       if  args.size ≥ 2 then
           return Nat.max (<- CalcBitWidth args[args.size-1]! hs)  (<- CalcBitWidth args[args.size-2]! hs)
       return 1
@@ -559,6 +571,8 @@ elab_rules : tactic
 
 
 
+lemma ZMod.val_neg_sub_zero {p : Nat} {x : ZMod p} : (-x : ZMod p) = (0 - x) := by
+  simpa using (zero_sub x).symm
 
 
 
@@ -803,7 +817,7 @@ elab_rules : tactic
             -- let init := cur_g.dropLast
             -- focus only the last goal
             withMainContext  do
-              evalTactic (← `(tactic| try_apply_lemma_hyps [$[$all],*]))
+              evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$all],*]))
             let after ← getGoals
             --logInfo m!"CUR GOALS: {after}"
             if after.isEmpty then
@@ -874,7 +888,7 @@ elab_rules : tactic
             setGoals [g_last]
             withMainContext  do
               logInfo m!"{g_last}"
-              evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$all],*]))
+              evalTactic (← `(tactic| try focus try_apply_lemma_hyps [$[$all],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ([g_one] ++ rest_rev)
@@ -914,8 +928,18 @@ elab_rules : tactic
 syntax (name := translateGoal)
   "translate_goal" ppSpace ("[" ident,* "]")? (ppSpace term)? : tactic
 
+-- def noteRhs (rhs : Expr) : TacticM Name := do
+--   let g ← getMainGoal
+--   withMVarContext g do
+--     let rhsName ← mkFreshUserName `rhs
+--     let rhsTy ← inferType rhs  -- should be Bool if it’s an if-condition
+--     let (fvarId, g') ← g.note rhsName rhsTy rhs
+--     setMainGoal g'
+--     return rhsName
 
-partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) : TacticM Unit := do
+partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) (count: Nat) : TacticM Unit := do
+  -- if count = 1 then
+  --   return
   let g ← getMainGoal
   let t ← g.getType
   let t2 <- instantiateMVars t
@@ -927,29 +951,25 @@ partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) : TacticM U
   let res ← firstCompositeInsideIf? t2
   match res with
   | none =>
-      logInfo "✅ Done — no composite expressions left inside any `if`."
+      --logInfo "✅ Done — no composite expressions left inside any `if`."
       pure ()
 
   | some if_comp =>
       -- Show we found something
-      --logInfo m!"🔍 Found composite: {if_comp}"
+      withMainContext do
+        logInfo m!"🔍 Found composite: {if_comp}"
 
-      -- Turn Expr into Syntax so we can splice it
-      let ifSyn ← PrettyPrinter.delab if_comp
+        -- Turn Expr into Syntax so we can splice it
+        let ifSyn ← PrettyPrinter.delab if_comp
+        evalTactic (← `(tactic| have rhs : Bool := $(ifSyn)))
 
-      -- Generate a fresh name: c₁, c₂, something unique
+        -- Call your custom tactic on it
+        evalTactic (← `(tactic| translate_hypothesis kc [$hs,*] [] $flagStx ))
 
-      -- set c := ...
-      evalTactic (← `(tactic| set kc := $(ifSyn) with hc))
-
-      -- Call your custom tactic on it
-      evalTactic (← `(tactic| translate_hypothesis hc [$hs,*] [] $flagStx ))
-
-      -- -- Simplify the goal using this new equality
+      -- -- -- -- -- Simplify the goal using this new equality
       evalTactic (← `(tactic| all_goals try simp [hc]))
-
-      -- -- Recurse on updated goal
-      loopUntilDone flag hs
+      -- -- -- -- Recurse on updated goal
+      loopUntilDone flag hs (count + 1)
 
 @[tactic translateGoal]
 elab_rules : tactic
@@ -992,6 +1012,12 @@ elab_rules : tactic
   while (subLoop) do
     try
       evalTactic (← `(tactic| rw [neg_param]))
+    catch _ =>
+      subLoop := false
+  subLoop := true
+  while (subLoop) do
+    try
+      evalTactic (← `(tactic| rw [<- zero_sub]))
     catch _ =>
       subLoop := false
   let mut mLoop := true
@@ -1039,7 +1065,7 @@ elab_rules : tactic
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
 
-            evalTactic (← `(tactic| try_apply_lemma_hyps [$[$ids],*]))
+            evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ([g_one] ++ rest_rev)
@@ -1054,7 +1080,7 @@ elab_rules : tactic
         catch _ => progress := false
      -- evalTactic (← `(tactic| try valify [$[$sargs],*]))
 
-  --l--ogInfo m! "HERE?"
+  -- --l--ogInfo m! "HERE?"
   evalTactic (← `(tactic| try simp ) )
 
   let goals <- getGoals
@@ -1062,12 +1088,12 @@ elab_rules : tactic
     logInfo m!"SOLVED"
     return
   -- --- FOR DEBUGGING REMOVE LATER PLEASE
-  loopUntilDone flag ids
+  loopUntilDone flag ids 0
 
-  -- let goals <- getGoals
-  -- if goals.isEmpty then
-  --   return
-  --logInfo m! "HERE?!"
+  let goals <- getGoals
+  if goals.isEmpty then
+    return
+  logInfo m! "HERE?!"
   let m <- CalcBitWidth (<-goals[0]!.getType) ids
   let bitsize := ceilLog2 (Nat.max m 4)
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
@@ -1076,7 +1102,7 @@ elab_rules : tactic
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
   --let n := countAnds t + k
-  --logInfo m!"ORS"
+  --logInfo m!"ORS: k & MIN :i"
   for _ in [:k] do
       evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
       evalTactic (← `(tactic| try bvify [$[$sargs],*]))
@@ -1098,7 +1124,7 @@ elab_rules : tactic
             throwError "❌ wrong number of goals left after Nat.mod_eq_of_lt"
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
-            evalTactic (← `(tactic| try_apply_lemma_hyps [$[$ids],*]))
+            evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ( [g_one ] ++ rest_rev )
@@ -1152,6 +1178,7 @@ def getVarEq (e : Expr) : Option FVarId :=
 
 def flattenAnds (h : TSyntax `ident) : TacticM (Array (TSyntax `ident)) :=
   withMainContext do
+    evalTactic (← `(tactic| try simp only [and_assoc] at $(mkIdent h.getId):ident ))
     let lctx ← getLCtx
     let some decl := lctx.findFromUserName? h.getId
       | throwError m!"no hyp `{h.getId}` in context"
@@ -1242,7 +1269,6 @@ def smartTranslateOne
     let hIdent : TSyntax `ident := mkIdent decl.userName
     --logInfo m! "We are here?"
     let hType ← whnf decl.type
-    --logInfo m! "{hType}"
     match isZModIdemEq hType with
     | some _ => do
         --logInfo m! "we are we not here..."
@@ -1365,9 +1391,7 @@ def smartTranslateMany
     | some w =>translate := translate.push w
     | none => pure ()
   for h in translate do
-    let g <- getMainGoal
     evalTactic (← `(tactic| translate_hypothesis $h [$[$picked],*]  [$[$replacement],*] $flagStx ))
-    let g <- getMainGoal
 
   return (picked++replacement,changed)
 
@@ -1425,7 +1449,6 @@ elab_rules : tactic
       ids <- flattenAnds ids[0]!
     catch _ => pure ()
 
-
   let varToHypRef ← IO.mkRef ({} : Std.HashMap FVarId (TSyntax `ident))
   let ( collected, changed) := (← smartTranslateMany ids sargs varToHypRef flag)
 
@@ -1456,6 +1479,7 @@ elab_rules : tactic
     | ``Eq  => true
     | ``Or => true
     | ``And => true
+    | ``Iff => true
     | _ => false
 
   if bitblast then
@@ -1564,6 +1588,44 @@ elab_rules : tactic
               after ← getGoals
             | none =>
                 break
+
+
+  --simp
+  --  set kc := (BitVec.ofNat 1
+  --   (((if b[0] = true then
+  --         (52435875175126190479447740508185965837690552500527637822603658699938581184513 -
+  --             if a[0] = true then 1 else 0) %
+  --           52435875175126190479447740508185965837690552500527637822603658699938581184513
+  --       else 0) +
+  --       if a[0] = true then 1 else 0) %
+  --     52435875175126190479447740508185965837690552500527637822603658699938581184513))[0] with hc
+  --  translate_hypothesis hc [] [] false
+  --  simp [kc] at *
+
+  -- rcases h1 with ⟨h1, h2⟩
+
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- variable (fresh_pf0_shift_bit0 : FF0)
+-- variable (b : BitVec 2)
+-- variable (a : BitVec 2)
+-- variable (fresh_pf1_shift_bit1 : FF0)
+-- variable (fresh_pf2_shift_bit2 : FF0)
+-- lemma correct :
+-- ((((((((fresh_pf0_shift_bit0) * (fresh_pf0_shift_bit0))) = (fresh_pf0_shift_bit0))) ∧ (((((fresh_pf1_shift_bit1) * (fresh_pf1_shift_bit1))) = (fresh_pf1_shift_bit1))) ∧ (((((fresh_pf2_shift_bit2) * (fresh_pf2_shift_bit2))) = (fresh_pf2_shift_bit2))) ∧ ((((fresh_pf0_shift_bit0) + (((fresh_pf1_shift_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((fresh_pf2_shift_bit2) * (4 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) = (((((if (((BVModEq.bool_to_bv 1 b[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (3 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (- (((((((if (((BVModEq.bool_to_bv 1 b[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((((((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (- (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))))))) + (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) + (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((((((if (((BVModEq.bool_to_bv 1 b[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (- (if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) + (if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) + (52435875175126190479447740508185965837690552500527637822603658699938581184512 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))))))))) + (((((((if (((BVModEq.bool_to_bv 1 b[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((((((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (- (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))))))) + (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) + (((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) + (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((((((if (((BVModEq.bool_to_bv 1 b[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (((((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (- (if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))))) + (if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))) + (52435875175126190479447740508185965837690552500527637822603658699938581184512 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)))))))))))) → (((((if (((BVModEq.bool_to_bv 1 (BitVec.sshiftRight' a b)[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf1_shift_bit1))) ∧ (((if (((BVModEq.bool_to_bv 1 (BitVec.sshiftRight' a b)[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf0_shift_bit0)))))))
+--  := by
+--  translate_all [] false
+
+--  rw [ZMod.val_sub] at h0_4
+--  swap
+--  focus try_apply_lemma_hyps [h0_1_1, h0_2_1, h0_3_1]
+ --valify [h0_1_1, h0_2_1, h0_3_1] at h0_4
+  --translate_all
+
 -- theorem my_decide_eq_false_iff (p : Prop) [Decidable p] :
 --    ¬ p  ↔ (decide p = false)  := by
 --   by_cases hp : p <;> simp [hp]
