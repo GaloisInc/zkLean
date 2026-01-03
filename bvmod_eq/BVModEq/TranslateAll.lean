@@ -884,53 +884,53 @@ elab_rules : tactic
       evalTactic (← `(tactic| try rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub] at $(mkIdent h.getId):ident))
       evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
   subLoop := true
-  -- while (subLoop ) do
-  --     try
-  --       evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident) )
-  --       let cur_g ← getGoals
-  --       match cur_g with
-  --       | [] => throwError "No goals after reorder"
-  --       | _ :: [] => throwError "wrong number of goals"
-  --       | g_one :: g_last :: rest_rev => do
-  --           setGoals [g_last]
-  --           withMainContext  do
-  --            -- logInfo m!"{g_last}"
-  --             evalTactic (← `(tactic| try focus try_apply_lemma_hyps [$[$all],*]))
-  --           let after ← getGoals
-  --           if after.isEmpty then
-  --             setGoals ([g_one] ++ rest_rev)
-  --             evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
-  --           else
-  --             throwError m! "try_apply failed {after}"
-  --     catch e =>
-  --       --logInfo (Lean.Exception.toMessageData e)
-  --       try
-  --         evalTactic (← `(tactic| rw [BitVec.ofNat_mod_move] at $(mkIdent h.getId):ident) )
-  --         evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
-  --       catch _ =>
-  --         try
-  --           evalTactic (← `(tactic| rw  [Mathlib.Tactic.BVify.BitVec.ofNat_sub] at $(mkIdent h.getId):ident) )
-  --           evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
-  --         catch _ =>
-  --           subLoop := false
-  -- try
-  --     evalTactic (← `(tactic| try simp (config := { zeta := false, beta := false }) at $(mkIdent h.getId):ident) )
-  --     -- let i ← withMainContext do
-  --     -- let lctx ← getLCtx
-  --     -- let isTrue ← withMainContext do
-  --     --   let lctx ← getLCtx
-  --     --   let some decl := lctx.findFromUserName? h.getId
-  --     --     | throwError m!"No hypothesis named {h.getId}"
+  while (subLoop ) do
+      try
+        evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] at $(mkIdent h.getId):ident) )
+        let cur_g ← getGoals
+        match cur_g with
+        | [] => throwError "No goals after reorder"
+        | _ :: [] => throwError "wrong number of goals"
+        | g_one :: g_last :: rest_rev => do
+            setGoals [g_last]
+            withMainContext  do
+             -- logInfo m!"{g_last}"
+              evalTactic (← `(tactic| try focus try_apply_lemma_hyps [$[$all],*]))
+            let after ← getGoals
+            if after.isEmpty then
+              setGoals ([g_one] ++ rest_rev)
+              evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
+            else
+              throwError m! "try_apply failed {after}"
+      catch e =>
+        --logInfo (Lean.Exception.toMessageData e)
+        try
+          evalTactic (← `(tactic| rw [BitVec.ofNat_mod_move] at $(mkIdent h.getId):ident) )
+          evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
+        catch _ =>
+          try
+            evalTactic (← `(tactic| rw  [Mathlib.Tactic.BVify.BitVec.ofNat_sub] at $(mkIdent h.getId):ident) )
+            evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
+          catch _ =>
+            subLoop := false
+  try
+      evalTactic (← `(tactic| try simp (config := { zeta := false, beta := false }) at $(mkIdent h.getId):ident) )
+      -- let i ← withMainContext do
+      -- let lctx ← getLCtx
+      -- let isTrue ← withMainContext do
+      --   let lctx ← getLCtx
+      --   let some decl := lctx.findFromUserName? h.getId
+      --     | throwError m!"No hypothesis named {h.getId}"
 
-  --     --   let ty ← instantiateMVars decl.type
-  --     --   let ty ← whnf ty
+      --   let ty ← instantiateMVars decl.type
+      --   let ty ← whnf ty
 
-  --     --   pure <| match ty with
-  --     --     | Expr.const ``True _ => true
-  --     --     | _ => false
-  --     -- if isTrue then
-  --     --   throwError m!"Simplified too much"
-  -- catch _ => pure ()
+      --   pure <| match ty with
+      --     | Expr.const ``True _ => true
+      --     | _ => false
+      -- if isTrue then
+      --   throwError m!"Simplified too much"
+  catch _ => pure ()
 
 syntax (name := translateGoal)
   "translate_goal" ppSpace ("[" ident,* "]")? (ppSpace term)? : tactic
@@ -964,16 +964,16 @@ partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) (count: Nat
   | some if_comp =>
       -- Show we found something
       withMainContext do
-        --logInfo m!"🔍 Found composite: {if_comp}"
+        logInfo m!"🔍 Found composite: {if_comp}"
 
         -- Turn Expr into Syntax so we can splice it
         let ifSyn ← PrettyPrinter.delab if_comp
         evalTactic (← `(tactic| set kc := $(ifSyn) with hc))
 
-      -- Call your custom tactic on it
+      -- -- Call your custom tactic on it
         evalTactic (← `(tactic| translate_hypothesis hc [$hs,*] [] $flagStx ))
 
-          -- -- Simplify the goal using this new equality
+      --     -- -- Simplify the goal using this new equality
         evalTactic (← `(tactic| all_goals try simp [hc]))
 
           -- -- Recurse on updated goal
@@ -1093,9 +1093,9 @@ elab_rules : tactic
 
   let goals <- getGoals
   if goals.isEmpty then
-    --logInfo m!"SOLVED"
+    logInfo m!"SOLVED"
     return
-  -- --- FOR DEBUGGING REMOVE LATER PLEASE
+  -- -- --- FOR DEBUGGING REMOVE LATER PLEASE
   loopUntilDone flag ids 0
 
   let goals <- getGoals
@@ -1107,8 +1107,8 @@ elab_rules : tactic
   --logInfo m!"FIRST  {m}"
   let bitsize := ceilLog2 (Nat.max (m+1) 4)
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
-  --logInfo m!"BIT SIZE {bitsize} with {m}"
-  --  --loopUntilDone flag
+  logInfo m!"BIT SIZE {bitsize} with {m}"
+ --- loopUntilDone flag
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
 
@@ -1598,6 +1598,12 @@ elab_rules : tactic
               after ← getGoals
             | none =>
                 break
+
+
+--  --translate_hypothesis h [] [] false
+--  translate_goal [] false
+
+
 
 
 
