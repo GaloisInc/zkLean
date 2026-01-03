@@ -996,7 +996,7 @@ elab_rules : tactic
       let goalType ← g.getType
       --logInfo m! "GOALS {<- getGoals}"
       -- first we try to apply hypothesis
-      let instantiatedGoalType ← instantiateMVars goalType
+      let mut instantiatedGoalType ← instantiateMVars goalType
       let (fn, args) := instantiatedGoalType.getAppFnArgs
       let terms ← collectTerms instantiatedGoalType
       let i := countMinusOps instantiatedGoalType
@@ -1054,14 +1054,9 @@ elab_rules : tactic
               continue
       -- UNCOMMENT LATER
       let terms0 ← collectTerms instantiatedGoalType
-      if exprHasMod instantiatedGoalType && ! (terms0.size == 0) then do
-         let mut modLoop:= true
-         --count := 0
-         --while (modLoop ) do
-             -- count :=count + 1
-            --logInfo m! "HERe?"
+      if !progress && exprHasMod instantiatedGoalType && !(terms0.size == 0) then
         try
-              evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
+          evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
               let cur_g ← getGoals
               --logInfo m! "Goals after [Nat.mod_eq_of_lt]):\n{← getGoals}"
               match cur_g with
@@ -1107,8 +1102,9 @@ elab_rules : tactic
                   else
                     logInfo "❌ try_apply_lemma_hyps did NOT solve the isolated goal"
                     throwError m! "try_apply failed {after}"
-          catch e =>
-                logInfo m! "Could not remove mod {e.toMessageData}?"
+        catch e =>
+               pure ()
+               -- logInfo m! "Could not remove mod {e.toMessageData}?"
                 --modLoop := false
 
       --   evalTactic (← `(tactic| try simp))
@@ -1282,6 +1278,7 @@ elab_rules : tactic
 -- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
 
 --  abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+
 
 -- lemma aaa1 {a b : BitVec 3} :
 -- (((if a[0] = true then 1 else 0) +
