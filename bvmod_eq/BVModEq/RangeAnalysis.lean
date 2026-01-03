@@ -455,7 +455,7 @@ def caseSplitOnBitVecNames (g : MVarId) (terms : NameSet) : TacticM (List MVarId
           let tacticStx ←
             `(tactic| cases h : $(mkIdent (Name.mkSimple base))[$(Quote.quote idxNat)])
           evalTactic tacticStx
-          logInfo m!"🟢 Split on {base}[{idxNat}]"
+         -- logInfo m!"🟢 Split on {base}[{idxNat}]"
 
           -- 🟣 If this is the *last* variable, simp first, then split again
           if idx == names.length - 1 then
@@ -483,7 +483,7 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
   (g : MVarId) (hyps : List Name) (terms : NameSet)
   : ContT LoopBodyResult TacticM Unit := do
   let m <- checkTermsAreBitVecs g terms
-  logInfo m!"umm for {m}"
+  --logInfo m!"umm for {m}"
   --Step 1 we should check if terms are bit vectors
   if (m==0)  then
     --logInfo m!"HUH"
@@ -522,7 +522,7 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
          return ()
          --loopBodyReturn.apply { didMux := false, madeProgress := false, goals := [g], leftSide:= false }
   else if (m == 2 ) then
-      logInfo m! "we are here"
+      --logInfo m! "we are here"
        --if ← g.isAssigned then
         let newGoals ← caseSplitOnBitVecNames g terms
         if ← g.isAssigned then
@@ -544,7 +544,7 @@ macro_rules
 
 def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
   let decTy ← Meta.inferType cond0
-  logInfo m!"IF TM"
+  --logInfo m!"IF TM"
   try
     if (decTy.getAppApps.size != 0) then
       let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
@@ -564,7 +564,7 @@ def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyR
 def applyThisLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Expr) (leftSide : Bool) (stx : Syntax)
 
   : ContT LoopBodyResult TacticM Unit := do
-  logInfo m!"{stx}"
+  --logInfo m!"{stx}"
   try
     let subgoals ← g.apply (← elabTerm stx goalType)
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide, stopCompletely:= false }
@@ -684,7 +684,7 @@ def applyZModLemma (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : Exp
          return (← loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals , leftSide := false, stopCompletely:= false})
       catch e =>
       --logInfo m!"valify failed?"
-      logInfo m!"{e.toMessageData}"
+      --logInfo m!"{e.toMessageData}"
       pure ()
 
         -- Convert to syntax (safe version)
@@ -805,7 +805,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
     leftSide := true
   else
     leftSide := false
-  logInfo m!"LEFT: {leftSide}"
+  --logInfo m!"LEFT: {leftSide}"
   let applyThisLemma := applyThisLemma loopBodyReturn g mainGoalType leftSide
   let unfolded ←  if !leftSide then
      monadLift $ withTransparency .reducible (whnf args[2]!)
@@ -838,12 +838,12 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
         | _ => applyThisLemma lt
       | _ => pure ()
     | _ => pure ()
-  logInfo m! "here?"
+ -- logInfo m! "here?"
   match fn with
   | ``LE.le =>
-    logInfo m! "here!"
+   -- logInfo m! "here!"
     if containsMVar mainGoalType then
-      logInfo m! "here?{fn3}"
+     -- logInfo m! "here?{fn3}"
       match fn3 with
         | Expr.const name _ =>
           match name with
@@ -873,7 +873,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
               else
                 applyThisLemma zmodGT
           | ``BitVec.toNat =>
-            logInfo m! "No?"
+            --logInfo m! "No?"
             if exprHasMod mainGoalType then
               applyThisLemma modLemma
             else
@@ -887,7 +887,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
         | _ =>
           if fn3.isFVar then applyZModLemma loopBodyReturn g mainGoalType leftSide hyps
     else
-      logInfo m! "here2 {fn3}"
+      --logInfo m! "here2 {fn3}"
         --logInfo m! "{args[args.size-1]!.getAppFn}"
          match fn3 with
           | Expr.const name _ =>
@@ -923,7 +923,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
            --logInfo m! "Because we are here?"
            pure ()
     | _ =>
-      logInfo m! "{fn}"
+      --logInfo m! "{fn}"
       pure ()
 
 @[tactic tryApplyLemHyps]
@@ -991,7 +991,7 @@ elab_rules : tactic
         updatedGoalsReversed := g :: updatedGoalsReversed
         continue
       setGoals [g] -- focus on one goal at a time
-      logInfo m! "{g}"
+      --logInfo m! "{g}"
       --logInfo m! "GOAL {g}"
       let goalType ← g.getType
       --logInfo m! "GOALS {<- getGoals}"
@@ -1063,7 +1063,7 @@ elab_rules : tactic
         try
               evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
               let cur_g ← getGoals
-              logInfo m! "Goals after [Nat.mod_eq_of_lt]):\n{← getGoals}"
+              --logInfo m! "Goals after [Nat.mod_eq_of_lt]):\n{← getGoals}"
               match cur_g with
               | [] =>
                   throwError "❌ No goals after Nat.mod_eq_of_lt"
@@ -1074,7 +1074,7 @@ elab_rules : tactic
                   --logInfo m! "Goals after try_apply_lemma_hyps:\n{after}"
 
                   if after.isEmpty then
-                    logInfo "🎉 SUCCESS: isolated single goal solved. Restoring remaining goals."
+                    --logInfo "🎉 SUCCESS: isolated single goal solved. Restoring remaining goals."
                     progress := true
                     handled := true
                     let gs <- getGoals
@@ -1087,7 +1087,7 @@ elab_rules : tactic
                     throwError m! "try_apply failed {after}"
               | g_one :: g_last :: rest_rev => do
                   setGoals [g_last]
-                  logInfo m! "Goals after isolate:\n{← getGoals}"
+                  --logInfo m! "Goals after isolate:\n{← getGoals}"
                   --logInfo "Attempting: try_apply_lemma_hyps"
                   evalTactic (← `(tactic| try_apply_lemma_hyps [$[$hs],*]))
 
@@ -1095,7 +1095,7 @@ elab_rules : tactic
                   --logInfo m! "Goals after try_apply_lemma_hyps:\n{after}"
 
                   if after.isEmpty then
-                    logInfo "🎉 SUCCESS: isolated goal solved. Restoring remaining goals."
+                    --logInfo "🎉 SUCCESS: isolated goal solved. Restoring remaining goals."
                     setGoals ( [g_one ] ++ rest_rev )
                     progress := true
                     handled := true
@@ -1134,7 +1134,7 @@ elab_rules : tactic
           continue
      -- logInfo m!"umm..."
       let loopBodyResult ← (ContT.run · pure) $ MonadCont.callCC $ fun loopBodyReturn => do
-        logInfo m!"here? {g}"
+        --logInfo m!"here? {g}"
         if args.size > 3 then
           let g ← getMainGoal
           let goalType ← g.getType
@@ -1260,7 +1260,7 @@ elab_rules : tactic
     -- traversing an ever-growingly long prefix.
 
     setGoals (updatedGoalsReversed.reverse ++ goalQueue.dList ++ goalQueue.eList.reverse)
-    logInfo m! "NEW GOALS {<- getGoals} and {progress}"
+    --logInfo m! "NEW GOALS {<- getGoals} and {progress}"
     -- if (!progress) then
     --   try
     --     evalTactic (← `(tactic| omega))

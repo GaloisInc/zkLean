@@ -459,7 +459,7 @@ elab_rules : tactic
   let hyps := (ids.getElems.map (·.getId)).toList
   let pairsArr ← collectFromContext
   let pairs := pairsArr.toList
-  logInfo m!"Detected pairs (width, expr): {pairs}"
+  --logInfo m!"Detected pairs (width, expr): {pairs}"
 
   -- Group widths by underlying variable, keyed by FVarId
   let mut groups : List (Name  × Expr × List Nat) := []
@@ -475,8 +475,8 @@ elab_rules : tactic
       | none =>
           groups := (myName, x, [w]) :: groups
   --logInfo m!"=== Groups after aggregation ==="
-   for (fid, ws) in groups do
-     logInfo m!"{fid}: widths = {ws}"
+  --  for (fid, ws) in groups do
+  --    logInfo m!"{fid}: widths = {ws}"
 
   let some modExpr := modulus
     | throwError "[autoCastBits] no modulus found"
@@ -870,7 +870,7 @@ elab_rules : tactic
     let some decl := lctx.findFromUserName? h.getId
       | throwError m!"No hypothesis named {h.getId}"
     CalcBitWidth decl.type ids
-  logInfo m!"FIRST  {m}"
+ -- logInfo m!"FIRST  {m}"
   let bitsize := ceilLog2 (Nat.max (m+1) 4)
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
   logInfo m!"{bitsize} with {m}"
@@ -964,7 +964,7 @@ partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) (count: Nat
   | some if_comp =>
       -- Show we found something
       withMainContext do
-        logInfo m!"🔍 Found composite: {if_comp}"
+        --logInfo m!"🔍 Found composite: {if_comp}"
 
         -- Turn Expr into Syntax so we can splice it
         let ifSyn ← PrettyPrinter.delab if_comp
@@ -1093,7 +1093,7 @@ elab_rules : tactic
 
   let goals <- getGoals
   if goals.isEmpty then
-    logInfo m!"SOLVED"
+    --logInfo m!"SOLVED"
     return
   -- --- FOR DEBUGGING REMOVE LATER PLEASE
   loopUntilDone flag ids 0
@@ -1101,13 +1101,13 @@ elab_rules : tactic
   let goals <- getGoals
   if goals.isEmpty then
     return
-  logInfo m! "HERE?!"
+  --ogInfo m! "HERE?!"
   let m <- CalcBitWidth (<-goals[0]!.getType) ids
   --let bitsize :=  ceilLog2 (2^512)
-  logInfo m!"FIRST  {m}"
+  --logInfo m!"FIRST  {m}"
   let bitsize := ceilLog2 (Nat.max (m+1) 4)
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
-  logInfo m!"BIT SIZE {bitsize} with {m}"
+  --logInfo m!"BIT SIZE {bitsize} with {m}"
   --  --loopUntilDone flag
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
