@@ -558,7 +558,7 @@ elab_rules : tactic
       let lctx ← getLCtx
 
       for c in hyps do
-        logInfo m!"{c}"
+        --logInfo m!"{c}"
         try
           -- ✅ resolve the Name `c` to a real local hypothesis
           let some decl := lctx.findFromUserName? c
@@ -1244,7 +1244,7 @@ elab_rules : tactic
           evalTactic (← `(tactic| rw [BitVec.ofNat_mod_move]))
           evalTactic (← `(tactic| try bvify [$[$sargs],*]))
         catch e =>
-           logInfo m!"WHY {e.toMessageData}"
+           --logInfo m!"WHY {e.toMessageData}"
            try
              evalTactic (← `(tactic| rw  [Mathlib.Tactic.BVify.BitVec.ofNat_sub]))
              evalTactic (← `(tactic| try bvify [$[$sargs],*]))
