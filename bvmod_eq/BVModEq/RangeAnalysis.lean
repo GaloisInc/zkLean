@@ -302,16 +302,19 @@ partial def exprHasIf (e : Expr) : Bool :=
       exprHasIf b
   | .const n _ =>
       -- check whether the head constant name is the modulus operator
-      n == ``ite
+      n == ``ite || n == ``dite
   | _ => false
 
 partial def exprHasNestedIf (e : Expr) : Bool :=
-  match e with
+  match ( e) with
   | .app f a =>
      match f with
       | .const n _ =>
-        if n == ``ite then
-            if exprHasIf a.getAppArgs[a.getAppArgs.size-3]! then
+        if n == ``ite || n == `dite  then
+
+            if exprHasIf a.getAppArgs[a.getAppArgs.size-3]! ||
+               exprHasIf a.getAppArgs[a.getAppArgs.size-2]! ||
+               exprHasIf a.getAppArgs[a.getAppArgs.size-1]! then
               true
             else false
         else false
@@ -1222,9 +1225,11 @@ elab_rules : tactic
              --logInfo m! "HASSDSA"
              caseByCaseOnTwoVariables loopBodyReturn g hyps terms
             -- catch _ => pure ()
+          --logInfo m!"{ exprHasNestedIf instantiatedGoalType}"
           if exprHasNestedIf instantiatedGoalType then
             let g <- getMainGoal
             try
+              logInfo m!"DAMMIT"
               monadLift $ do evalTactic (← `(tactic| split_ifs))
               let g' <- getMainGoal
 
@@ -1299,13 +1304,16 @@ elab_rules : tactic
           catch _err =>
               return { didMux := false, madeProgress := false, goals := [g] , leftSide := false, stopCompletely:= true}
         -- last shot try simp
-        --  try
-        --   monadLift $ do evalTactic (← `(tactic| simp))
-        --   if ← g.isAssigned then
-        --     logInfo m!"✅ Fully solved goal using simp {goalType}"
-        --     let mut gs <- getGoals
-        --     return { didMux := false, madeProgress := true, goals := gs }
-        -- catch _err => pure ()
+        try
+          logInfo m!"We are here?"
+          monadLift $ do evalTactic (← `(tactic|  focus
+                  (split_ifs; all_goals simp) ))
+          if ← g.isAssigned then
+            logInfo m!"✅ Fully solved goal using simp {goalType}"
+            let mut gs <- getGoals
+            return { didMux := false, madeProgress := true, goals := gs , leftSide :=false, stopCompletely:=false}
+        catch _err => pure ()
+        logInfo m!"did not work"
         -- if we made it here, nothing worked
         return { didMux := false, madeProgress := false, goals := [g], leftSide:=false, stopCompletely:= false }
       if loopBodyResult.didMux then did_mux := true
@@ -1396,7 +1404,32 @@ elab_rules : tactic
   -- simp [h]
 
 
-
+lemma hello{a b : BitVec 2} :
+    ((((if
+          ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
+                  if a[0] = true then 1#3 else 0#3) -
+                if b[1] = true then 2#3 else 0#3)[0] =
+            true then
+        1
+      else 0) +
+      if
+          ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
+                  if a[0] = true then 1#3 else 0#3) -
+                if b[1] = true then 2#3 else 0#3)[1] =
+            true then
+        2
+      else 0) +
+    if
+        ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
+                if a[0] = true then 1#3 else 0#3) -
+              if b[1] = true then 2#3 else 0#3)[2] =
+          true then
+      4
+    else 0) <
+  52435875175126190479447740508185965837690552500527637822603658699938581184513
+    )
+:= by
+       try_apply_lemma_hyps []
 
 
 -- macro_rules
