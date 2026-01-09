@@ -1194,9 +1194,8 @@ elab_rules : tactic
   if goals.isEmpty then
     logInfo m!"SOLVED"
     return
-  -- -- --- FOR DEBUGGING REMOVE LATER PLEASE
+  -- --- FOR DEBUGGING REMOVE LATER PLEASE
 
-  --ogInfo m! "HERE?!"
   let m <- CalcBitWidth (<-goals[0]!.getType) ids
   --let bitsize :=  ceilLog2 (2^512)
   --logInfo m!"FIRST  {m}"
@@ -1206,9 +1205,9 @@ elab_rules : tactic
 
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
-  --loopUntilDone flag ids (count+1)
-  --let n := countAnds t + k
-  logInfo m!"ORS: k & MIN :i"
+  loopUntilDone flag ids (count+1)
+  -- --let n := countAnds t + k
+  -- logInfo m!"ORS: k & MIN :i"
   for _ in [:k] do
       evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
       evalTactic (← `(tactic| try bvify [$[$sargs],*]))
@@ -1218,7 +1217,6 @@ elab_rules : tactic
       evalTactic (← `(tactic| try bvify [$[$sargs],*] ) )
   let mut modLeft := true
   subLoop := true
-  logInfo m!"HERE"
   while (subLoop ) do
       count :=count + 1
       try
@@ -1252,8 +1250,8 @@ elab_rules : tactic
               subLoop := false
   evalTactic (← `(tactic| try simp  ))
 
-  --evalTactic (← `(tactic| split_ands ) )
-  -- evalTactic (← `(tactic| bv_decide ) )
+
+
 
 
 
@@ -1530,11 +1528,11 @@ elab_rules : tactic
     | some bterm =>
         pure true
     | none => pure false
-  -- evalTactic (← `(tactic| try simp))
-  -- let gs ← getGoals
-  -- if gs.isEmpty then
-  --   logInfo "✅ No goals left!"
-  --   return
+  evalTactic (← `(tactic| try simp))
+  let gs ← getGoals
+  if gs.isEmpty then
+    logInfo "✅ No goals left!"
+    return
 
   let name := Name.mkSimple s!"h"
   let g ← getMainGoal
@@ -1573,7 +1571,7 @@ elab_rules : tactic
     `(false)
   evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx ))
 
-  loopUntilDone false ids 0
+
   evalTactic (← `(tactic| try simp ))
   let flag ←
     match b with
@@ -1702,7 +1700,21 @@ elab_rules : tactic
 
 
 
-  -- focus try_apply_lemma_hyps [h0_new, h1_1, h1_2, h1_3, h1_4, h1_5, h1_6, h1_7, h1_8, h1_9,h1_10,h1_11,h1_12,h1_13,h1_14,h1_15,h1_16]
+
+
+
+
+
+  -- rw [Nat.mod_eq_of_lt] --focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]
+  -- focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]
+  -- focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]
+
+  --focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]
+  --f--ocus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]
+
+
+
+
   -- focus try_apply_lemma_hyps [h0_new, h1_1, h1_2, h1_3, h1_4, h1_5, h1_6, h1_7, h1_8, h1_9,h1_10,h1_11,h1_12,h1_13,h1_14,h1_15,h1_16]
 
   -- all_goals sorry

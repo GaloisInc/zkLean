@@ -563,7 +563,7 @@ def caseByCaseOnTwoVariables (loopBodyReturn : LoopBodyLabel)
             logInfo m!"➖ elim2 modified goal {g}, but did not fully solve it"
             loopBodyReturn.apply { didMux := false, madeProgress := true, goals := [g], leftSide:= false, stopCompletely:= false }
           else
-            logInfo m!"HUH {newGoals}"
+            --logInfo m!"HUH {newGoals}"
             loopBodyReturn.apply { didMux := false, madeProgress := true, goals := newGoals, leftSide:= false, stopCompletely:= false }
       else
          --logInfo m!"{m}"
@@ -1073,7 +1073,8 @@ elab_rules : tactic
       let (fn, args) := instantiatedGoalType.getAppFnArgs
       let terms ← collectTerms instantiatedGoalType
       let i := countMinusOps instantiatedGoalType
-     -- logInfo m!"HUH{<- firstCompositeInsideVal? instantiatedGoalType}"
+      -- logInfo m!"HUH{<- firstCompositeInsideVal? instantiatedGoalType}"
+      -- logInfo m!"HUH{i}"
       if (<- firstCompositeInsideVal? instantiatedGoalType) ||  need_to_valify then do
         try
           evalTactic (← `(tactic| valify [$sargs,*]))
@@ -1082,12 +1083,12 @@ elab_rules : tactic
         catch _ => pure ()
         if i > 0 then
           try
-            for _ in [:i] do
-                evalTactic (← `(tactic| try valify [$sargs,*]))
-                evalTactic (← `(tactic| rw [ZMod.val_sub]))
-                evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
-                evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
-                evalTactic (← `(tactic| try simp))
+            --for _ in [:i] do
+            evalTactic (← `(tactic| try valify [$sargs,*]))
+            evalTactic (← `(tactic| rw [ZMod.val_sub]))
+            evalTactic (← `(tactic| try valify [$[$sargs],*] ) )
+            evalTactic (← `(tactic| try rw  [Nat.mod_eq_of_lt]))
+            evalTactic (← `(tactic| try simp))
             let gs <- getGoals
             updatedGoalsReversed := gs ++ updatedGoalsReversed
             progress := true
@@ -1386,9 +1387,20 @@ elab_rules : tactic
 -- swap
 
 --apply mod_le_pred
+-- set_option maxRecDepth 1048576
+-- set_option maxHeartbeats  20000000000000000000
+-- set_option exponentiation.threshold 900
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- abbrev f := FF0
 
-
-
+--  lemma sos {fv1 fv2 : Vector f 8 }
+--   (h1_1  : ZMod.val fv1[1] ≤ 1)
+--   (h2_1  : ZMod.val fv2[1] ≤ 1) : ZMod.val fv2[1] ≤ ZMod.val ((1:f) + fv1[1] * fv2[1] + fv1[1] * fv2[1] - fv1[1]) := by
+--   try_apply_lemma_hyps [h1_1, h2_1]
 
 
 
