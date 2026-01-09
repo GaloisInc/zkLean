@@ -18,24 +18,28 @@ def RIGHT_MSB_16 [Field f] : Subtable f 16 :=
   subtableFromMLE (fun x => x[8])
 
   lemma right_msb_mle_one_chunk [ZKField f] (bv1 bv2 : BitVec 8) (fv1 fv2 : Vector f 8) :
-  some bvoutput = map_f_to_bv_8 foutput ->
-   some (bool_to_bv bv1[7])  = map_f_to_bv_8 fv1[0]  ->
-   some (bool_to_bv bv1[6]) = map_f_to_bv_8 fv1[1]  ->
-   some (bool_to_bv bv1[5]) = map_f_to_bv_8 fv1[2]  ->
-   some (bool_to_bv bv1[4]) = map_f_to_bv_8 fv1[3]  ->
-   some (bool_to_bv bv1[3]) = map_f_to_bv_8 fv1[4]  ->
-  some (bool_to_bv bv1[2]) = map_f_to_bv_8 fv1[5]  ->
-   some (bool_to_bv bv1[1]) = map_f_to_bv_8 fv1[6]  ->
-   some (bool_to_bv bv1[0]) = map_f_to_bv_8 fv1[7]  ->
-  some (bool_to_bv bv2[7]) = map_f_to_bv_8 fv2[0]  ->
-  some (bool_to_bv bv2[6]) = map_f_to_bv_8 fv2[1]  ->
-  some (bool_to_bv bv2[5]) = map_f_to_bv_8 fv2[2]  ->
-  some (bool_to_bv bv2[4]) = map_f_to_bv_8 fv2[3]  ->
-  some (bool_to_bv bv2[3]) = map_f_to_bv_8 fv2[4]  ->
-  some (bool_to_bv bv2[2]) = map_f_to_bv_8 fv2[5]  ->
-  some (bool_to_bv bv2[1]) = map_f_to_bv_8 fv2[6]  ->
-  some (bool_to_bv bv2[0]) = map_f_to_bv_8 fv2[7]  ->
-  (bvoutput = bool_to_bv (BitVec.msb bv2))
+  some bvoutput = BVModEq.map_f_to_bv 8 foutput ->
+   some (BVModEq.bool_to_bv 8 bv1[7])  = BVModEq.map_f_to_bv 8 fv1[0]  ->
+   some (BVModEq.bool_to_bv 8 bv1[6]) = BVModEq.map_f_to_bv 8 fv1[1]  ->
+   some (BVModEq.bool_to_bv 8 bv1[5]) = BVModEq.map_f_to_bv 8 fv1[2]  ->
+   some (BVModEq.bool_to_bv 8 bv1[4]) = BVModEq.map_f_to_bv 8 fv1[3]  ->
+   some (BVModEq.bool_to_bv 8 bv1[3]) = BVModEq.map_f_to_bv 8 fv1[4]  ->
+  some (BVModEq.bool_to_bv 8 bv1[2]) = BVModEq.map_f_to_bv 8 fv1[5]  ->
+   some (BVModEq.bool_to_bv 8 bv1[1]) = BVModEq.map_f_to_bv 8 fv1[6]  ->
+   some (BVModEq.bool_to_bv 8 bv1[0]) = BVModEq.map_f_to_bv 8 fv1[7]  ->
+  some (BVModEq.bool_to_bv 8 bv2[7]) = BVModEq.map_f_to_bv 8 fv2[0]  ->
+  some (BVModEq.bool_to_bv 8 bv2[6]) = BVModEq.map_f_to_bv 8 fv2[1]  ->
+  some (BVModEq.bool_to_bv 8 bv2[5]) = BVModEq.map_f_to_bv 8 fv2[2]  ->
+  some (BVModEq.bool_to_bv 8 bv2[4]) = BVModEq.map_f_to_bv 8 fv2[3]  ->
+  some (BVModEq.bool_to_bv 8 bv2[3]) = BVModEq.map_f_to_bv 8 fv2[4]  ->
+  some (BVModEq.bool_to_bv 8 bv2[2]) = BVModEq.map_f_to_bv 8 fv2[5]  ->
+  some (BVModEq.bool_to_bv 8 bv2[1]) = BVModEq.map_f_to_bv 8 fv2[6]  ->
+  (bvoutput =  BVModEq.bool_to_bv 8 (BitVec.msb bv2))
   =
   (foutput = evalSubtable RIGHT_MSB_16 (Vector.append fv1 fv2))
- := by solveMLE RIGHT_MSB_16 8
+ := by
+  unfold RIGHT_MSB_16
+  unfold evalSubtable
+  unfold subtableFromMLE
+  unfold Vector.append
+  translate_all false

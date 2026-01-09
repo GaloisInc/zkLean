@@ -346,8 +346,9 @@ def didMux : TacticM Unit := do
   evalTactic (← `(tactic| try simp))
   evalTactic (← `(tactic| try ring))
   evalTactic (← `(tactic| try intro hMux))
-  evalTactic (← `(tactic| try simp only [hMux]))
-  evalTactic (← `(tactic| try rw [Nat.mux_if_then] at ⊢))
+  evalTactic (← `(tactic| try simp [hMux]))
+  evalTactic (← `(tactic| try simp ))
+  evalTactic (← `(tactic| rw [Nat.mux_if_then] at ⊢))
 
 def bothArgsAreApps (e : Expr) : Bool :=
   match e.getAppFnArgs with
@@ -576,12 +577,12 @@ macro_rules
 
 def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
   let decTy ← Meta.inferType cond0
-  --logInfo m!"IF TM"
+  logInfo m!"IF TM"
   try
     if (decTy.getAppApps.size != 0) then
       let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
       monadLift $ do evalTactic (← `(tactic| split_prop_if $condSyn))
-      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false }
+      loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false}
     else
       monadLift $ do evalTactic (← `(tactic| split_ifs))
       loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false }
@@ -1316,7 +1317,9 @@ elab_rules : tactic
         logInfo m!"did not work"
         -- if we made it here, nothing worked
         return { didMux := false, madeProgress := false, goals := [g], leftSide:=false, stopCompletely:= false }
-      if loopBodyResult.didMux then did_mux := true
+      if loopBodyResult.didMux then
+          did_mux := true
+          --stop_completely := true
       if loopBodyResult.stopCompletely then stop_completely := true
       if loopBodyResult.madeProgress then do
         handled := true; progress := true
@@ -1389,6 +1392,40 @@ elab_rules : tactic
 
 
 
+--   focus try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+--   --try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+--   focus try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+--   --try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+--   simp
+--   try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+--   focus try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+
+--   --try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+
+  -- lemma sos {fv1 fv2 : Vector f 8 }
+  -- (h1_1  : ZMod.val fv1[3] ≤ 1)
+  -- (h2_1  : ZMod.val fv1[4] ≤ 1)
+  -- (h3_1  : ZMod.val fv1[5] ≤ 1)
+  -- (h4_1  : ZMod.val fv1[6] ≤ 1)
+  -- (h5_1  : ZMod.val fv1[7] ≤ 1)
+  -- (h6_1  : ZMod.val fv1[2] ≤ 1)
+  -- (h7_1  : ZMod.val fv1[1] ≤ 1)
+  -- (h8_1  : ZMod.val fv1[0] ≤ 1)
+  -- (h9_1  : ZMod.val fv2[0] ≤ 1)
+  -- (h10_1 : ZMod.val fv2[1] ≤ 1)
+  -- (h11_1 : ZMod.val fv2[2] ≤ 1) : (1 - ZMod.val fv2[1]) *
+  --     (ZMod.val fv1[7] + ZMod.val fv1[6] * 2 + ZMod.val fv1[5] * 4 + ZMod.val fv1[4] * 8 + ZMod.val fv1[3] * 16 +
+  --           ZMod.val fv1[2] * 32 +
+  --         ZMod.val fv1[1] * 64 +
+  --       ZMod.val fv1[0] * 128) +
+  --   ZMod.val fv2[1] *
+  --     (ZMod.val fv1[7] * 4 + ZMod.val fv1[6] * 8 + ZMod.val fv1[5] * 16 + ZMod.val fv1[4] * 32 + ZMod.val fv1[3] * 64 +
+  --           ZMod.val fv1[2] * 128 +
+  --         ZMod.val fv1[1] * 256 +
+  --       ZMod.val fv1[0] * 512) ≤ 2^32 := by
+  -- try_apply_lemma_hyps [h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1, h10_1, h11_1]
+
+
 
 
   --evalTactic (← `(tactic| try apply Nat.le_refl; try simp))
@@ -1404,32 +1441,32 @@ elab_rules : tactic
   -- simp [h]
 
 
-lemma hello{a b : BitVec 2} :
-    ((((if
-          ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
-                  if a[0] = true then 1#3 else 0#3) -
-                if b[1] = true then 2#3 else 0#3)[0] =
-            true then
-        1
-      else 0) +
-      if
-          ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
-                  if a[0] = true then 1#3 else 0#3) -
-                if b[1] = true then 2#3 else 0#3)[1] =
-            true then
-        2
-      else 0) +
-    if
-        ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
-                if a[0] = true then 1#3 else 0#3) -
-              if b[1] = true then 2#3 else 0#3)[2] =
-          true then
-      4
-    else 0) <
-  52435875175126190479447740508185965837690552500527637822603658699938581184513
-    )
-:= by
-       try_apply_lemma_hyps []
+-- lemma hello{a b : BitVec 2} :
+--     ((((if
+--           ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
+--                   if a[0] = true then 1#3 else 0#3) -
+--                 if b[1] = true then 2#3 else 0#3)[0] =
+--             true then
+--         1
+--       else 0) +
+--       if
+--           ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
+--                   if a[0] = true then 1#3 else 0#3) -
+--                 if b[1] = true then 2#3 else 0#3)[1] =
+--             true then
+--         2
+--       else 0) +
+--     if
+--         ((((if a[1] = true then 2#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + 4#3 -
+--                 if a[0] = true then 1#3 else 0#3) -
+--               if b[1] = true then 2#3 else 0#3)[2] =
+--           true then
+--       4
+--     else 0) <
+--   52435875175126190479447740508185965837690552500527637822603658699938581184513
+--     )
+-- := by
+--        try_apply_lemma_hyps []
 
 
 -- macro_rules

@@ -37,6 +37,7 @@ lemma sign_extend_mle_one_chunk {bvoutput foutput} [ZKField f] (bv1 bv2 : BitVec
   (bvoutput = BitVec.fill 16 bv1[7])
   =
   (foutput = evalSubtable SIGN_EXTEND_16_16 (Vector.append fv1 fv2)) := by
+  unfold BitVec.fill
   unfold SIGN_EXTEND_16_16
   unfold evalSubtable
   unfold subtableFromMLE

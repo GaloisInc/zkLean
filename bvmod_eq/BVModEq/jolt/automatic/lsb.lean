@@ -36,7 +36,7 @@ lemma lsb_mle_one_chunk [ZKField f] (bv1 bv2 : BitVec 8) (fv1 fv2 : Vector f 8) 
   some (BVModEq.bool_to_bv 8 bv2[2]) = BVModEq.map_f_to_bv 8 fv2[5]  ->
   some (BVModEq.bool_to_bv 8 bv2[1]) = BVModEq.map_f_to_bv 8 fv2[6]  ->
   some (BVModEq.bool_to_bv 8 bv2[0]) = BVModEq.map_f_to_bv 8 fv2[7]  ->
-  (bvoutput = BVModEq.bool_to_bv 8 (BitVec.getLsb' bv2 0))
+  (bvoutput = BVModEq.bool_to_bv 8 (bv2[0]))
   =
   (foutput = evalSubtable LSB_16 (Vector.append fv1 fv2)) := by
   unfold LSB_16
