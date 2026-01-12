@@ -1705,6 +1705,7 @@ elab_rules : tactic
 
 
 
+
   -- rw [Nat.mod_eq_of_lt] --focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]
   -- focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]
   -- focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1,h7_1,h8_1,h9_1,h10_1,h11_1,h12_1,h13_1,h14_1, h15_1, h16_1]

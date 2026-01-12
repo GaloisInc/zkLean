@@ -346,7 +346,7 @@ def didMux : TacticM Unit := do
   evalTactic (← `(tactic| try simp))
   evalTactic (← `(tactic| try ring))
   evalTactic (← `(tactic| try intro hMux))
-  evalTactic (← `(tactic| try simp [hMux]))
+  evalTactic (← `(tactic| try simp only [hMux]))
   evalTactic (← `(tactic| try simp ))
   evalTactic (← `(tactic| rw [Nat.mux_if_then] at ⊢))
 
@@ -393,7 +393,7 @@ def handleIfMux (loopBodyReturn : LoopBodyLabel) (g : MVarId) (args : Array Expr
     setGoals [pr.mvarId!, gWithHyp]
     didMux
     let MyGoals <- getGoals
-    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := MyGoals, leftSide := false, stopCompletely := false }
+    loopBodyReturn.apply { didMux := false, madeProgress := true, goals := MyGoals, leftSide := false, stopCompletely := false}
   | _ => return ()
 
 
@@ -577,7 +577,6 @@ macro_rules
 
 def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
   let decTy ← Meta.inferType cond0
-  logInfo m!"IF TM"
   try
     if (decTy.getAppApps.size != 0) then
       let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
@@ -1040,7 +1039,7 @@ elab_rules : tactic
   let mut stop_completely := false
   -- as long as we are making progress then continue
   count  := 0
-  while (progress) do
+  while (progress ) do
     --logInfo m!"we get here?"
     count := count + 1
     if stop_completely then
@@ -1056,7 +1055,7 @@ elab_rules : tactic
     progress := false
     -- Note: do not use `enqueueAll` as it would need reversing the list
     let mut goalQueue := Std.Queue.mk [] goals
-    while (not handled && not goalQueue.isEmpty ) do
+    while (not handled && not goalQueue.isEmpty  ) do
       count := count + 1
       let mut some (g, rest) := goalQueue.dequeue? | unreachable!
       goalQueue := rest
@@ -1212,6 +1211,7 @@ elab_rules : tactic
           let args := e.getAppArgs
           -- First check if we are dealing with a mux
           handleIfMux loopBodyReturn g args
+
           --logInfo m! "{<- getGoals}"
 
           -- if not a mux but we have only two variables do a case by case reasoning
@@ -1318,6 +1318,7 @@ elab_rules : tactic
         logInfo m!"did not work"
         -- if we made it here, nothing worked
         return { didMux := false, madeProgress := false, goals := [g], leftSide:=false, stopCompletely:= false }
+      --throwError "AAAA"
       if loopBodyResult.didMux then
           did_mux := true
           --stop_completely := true
@@ -1367,6 +1368,12 @@ elab_rules : tactic
 --   57896044618658097711785492504343953926634992332820282019728792003956564819968 := by
 --    try_apply_lemma_hyps[]
 
+
+
+
+ -- evalTactic (← `(tactic| try simp only [hMux]))
+ -- evalTactic (← `(tactic| try simp ))
+ -- evalTactic (← `(tactic| rw [Nat.mux_if_then] at ⊢))
 
 -- lemma aaa1 {a b : BitVec 3} :
 -- (((if a[0] = true then 1 else 0) +
