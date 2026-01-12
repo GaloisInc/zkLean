@@ -118,8 +118,8 @@ partial def viewAsMux (e : Expr) : Option (Expr × List Expr × List Expr) := do
 elab "elim2_norm_num" h1:ident h2:ident : tactic => do
   let id1 : TSyntax `ident := mkIdent h1.getId
   let id2 : TSyntax `ident := mkIdent h2.getId
-  logInfo m!"{id1}"
-  logInfo m!"{id2}"
+  -- logInfo m!"{id1}"
+  -- logInfo m!"{id2}"
   --logInfo m!"{<-getGoals}"
   evalTactic (← `(tactic| apply split_one at $(id1):ident))
   evalTactic (← `(tactic| apply split_one at $(id2):ident))
@@ -1252,7 +1252,7 @@ elab_rules : tactic
           --logInfo m! "TERMS{bothArgsAreApps instantiatedGoalType}"
           if ((terms.size = 2))  && ( (← containsSub instantiatedGoalType) ||  bothArgsAreApps instantiatedGoalType )  then
              --try
-             logInfo m! "HASSDSA"
+             --logInfo m! "HASSDSA"
              caseByCaseOnTwoVariables loopBodyReturn g hyps terms
             -- catch _ => pure ()
           --logInfo m!"{ exprHasNestedIf instantiatedGoalType}"
