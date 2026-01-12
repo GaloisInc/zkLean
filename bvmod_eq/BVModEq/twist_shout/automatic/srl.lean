@@ -97,10 +97,9 @@ lemma srl_32_mle_one_chunk_[ZKField f] (bv1 bv2 : BitVec 32) (fv1 fv2 : Vector f
   (foutput = evalSubtable VirtualSRL_64 (Vector.append fv1 fv2)))
 := by
    unfold pext32
-   unfold pext32.go 
+   repeat unfold pext32.go
    unfold VirtualSRL_64
    unfold evalSubtable
    unfold subtableFromMLE
    unfold Vector.append
    translate_all false
- 
