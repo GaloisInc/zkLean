@@ -321,6 +321,122 @@ def matchOfNatVal? (e : Expr) : MetaM (Option (Nat × Expr × Expr)) := do
 
 
 
+
+def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
+    let ty ← instantiateMVars ty
+    --let ty ← whnf ty
+    let (fn, args) := ty.getAppFnArgs
+    -- extract the two sides of a relation (we consistently take the last two args)
+    let sides? : Option (Expr × Expr) :=
+      match fn with
+      | ``Eq    => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | ``LT.lt  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      |  ``LE.le  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | ``GT.gt  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | ``GE.ge  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | _ => none
+    match sides? with
+    | none => pure (none)
+    | some (lhs, rhs) =>
+        -- get `% n` modulus if expression is `Nat.mod _ n` with numeral n
+        let getModLit (e : Expr) :  MetaM (Option (Expr × Nat)) := do
+          --let e ← whnf e
+
+          let (f, as) := e.getAppFnArgs
+
+          match f with
+          | ``HMod.hMod =>
+              if h : as.size >= 2 then
+
+                let (f2, as2) := as[as.size-1].getAppFnArgs
+                match f2 with
+                | ``OfNat.ofNat =>
+
+                   match as2[as2.size-2]! with
+                      | Expr.lit (Literal.natVal n) => pure (some (as[as.size-2], n))
+                      | _ => pure ( none )
+                   --pure (some 2)
+                | _ => pure none
+              else
+                pure none
+          | _ => pure none
+
+        let ml ← getModLit lhs
+        let mr ← getModLit rhs
+        match ml, mr with
+        | some n, none   => pure (some n)
+        | none,   some n => pure (some n)
+        | _,      _      => pure none
+
+
+
+def externalModulusOneSideWrapper? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
+let (fn, args) := ty.getAppFnArgs
+    match fn with
+      | ``Iff => do
+          if args.size >= 2 then
+            let h ← externalModulusOneSide? args[args.size-2]!
+            let k ← externalModulusOneSide? args[args.size-1]!
+            match h, k with
+            | some n, none   => pure (some n)
+            | none,   some n => pure (some n)
+            | _,      _      => pure none
+          else
+            pure none
+       | _ => externalModulusOneSide? ty
+
+
+syntax (name := dbg_mod_syn) "dbg_mod" num "[" ident,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| dbg_mod $k:num [$ids:ident,*]) => do
+      -- k : Syntax, ids : Array Syntax
+  withMainContext do
+    let k : Nat := k.getNat
+
+    let g ← getMainGoal
+    let goalTy ← g.getType
+    let oldGoals ← getGoals
+
+     match (← externalModulusOneSideWrapper? goalTy) with
+    | none => pure ()
+    | some (exp, n) =>
+        if k < n then
+        -- A : Prop := exp < k
+          let A : Expr := mkApp2 (mkConst ``Nat.lt) exp (mkNatLit k)
+
+          -- pr : ?m : A  (this will become the "prove A" subgoal)
+          let pr ← g.withContext do mkFreshExprMVar (some A)
+
+          -- add hypothesis hmod : A := pr to the original goal context
+          let gWithHyp ← g.withContext do
+            -- NOTE: in your Lean, `assert` is MetaM, so lift it:
+            liftMetaM <| g.assert (Name.mkSimple "hmod") A pr
+
+          -- prove A first, then solve original goal with hmod available
+          let rest : List MVarId := oldGoals.erase g
+
+    -- set goals = prove A first, then continue with hypothesis, then the rest
+          setGoals (pr.mvarId! :: gWithHyp :: rest)
+
+          evalTactic (← `(tactic| try simp) )
+          evalTactic (← `(tactic| focus  try_apply_lemma_hyps [$[$ids],*] ))
+          evalTactic (← `(tactic| try simp) )
+          let g ← getMainGoal
+          let name := Name.mkSimple s!"proof"
+          let (kId, g')  <- g.intro name
+          replaceMainGoal [g']
+          let proofExpr := mkFVar kId
+          --evalTactic (← `(tactic| intro proof) )
+          g.withContext do
+            evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] ))
+            evalTactic (← `(tactic| swap ))
+            let hcTerm  : TSyntax `term  := ⟨mkIdent `proof⟩
+            evalTactic (← `(tactic| apply lt_of_lt_of_le $hcTerm (by decide)))
+        else
+          pure ()
+
+
 -- /-- Recursively gather all `(width, x)` inside an expression -/
 -- partial def collectMatches (e : Expr) : MetaM (Array (Nat × Expr)) := do
 
@@ -1204,8 +1320,42 @@ elab_rules : tactic
   --let bitsize :=  ceilLog2 (2^512)
   --logInfo m!"FIRST  {m}"
   let bitsize := ceilLog2 (Nat.max (m+1) 4)
+  let bitsize_full := Nat.pow 2 bitsize
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
+  let bitsizeStx_full : TSyntax `num := Syntax.mkNumLit (toString bitsize_full)
+
   logInfo m!"BIT SIZE {bitsize} with {m}"
+  let mut rmFailed := false
+  try
+      evalTactic (← `(tactic| dbg_mod $bitsizeStx_full [$[$ids],*]))
+      let hcTerm  : TSyntax `term  := ⟨mkIdent `proof⟩
+      evalTactic (← `(tactic|  rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
+      evalTactic (← `(tactic| swap ))
+      evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
+      evalTactic (← `(tactic| swap ))
+      evalTactic (← `(tactic| apply $hcTerm))
+
+        -- evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
+        -- let cur_g ← getGoals
+        -- match cur_g with
+        -- | [] =>
+        --     throwError "❌ No goals after Nat.mod_eq_of_lt"
+        -- | _ :: []  =>
+        --     throwError "❌ wrong number of goals left after Nat.mod_eq_of_lt"
+        -- | g_one :: g_last :: rest_rev => do
+        --     setGoals [g_last]
+        --     evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
+        --     let after ← getGoals
+        --     if after.isEmpty then
+        --       setGoals ( [g_one ] ++ rest_rev )
+        --       evalTactic (← `(tactic| try bvify [$[$sargs],*]))
+
+        --     else
+        --       throwError m! "try_apply failed {after}"
+  catch e =>
+      logInfo m!"{e.toMessageData}"
+      rmFailed := true
+
 
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
@@ -1220,6 +1370,8 @@ elab_rules : tactic
   subLoop := true
   while (subLoop ) do
       count :=count + 1
+      if rmFailed then
+        throwError "We already tried removal"
       try
         evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
         let cur_g ← getGoals
@@ -1239,6 +1391,7 @@ elab_rules : tactic
             else
               throwError m! "try_apply failed {after}"
       catch e =>
+        rmFailed := false
         try
           evalTactic (← `(tactic| rw [BitVec.ofNat_mod_move]))
           evalTactic (← `(tactic| try bvify [$[$sargs],*]))
@@ -1649,9 +1802,9 @@ elab_rules : tactic
           set $idSyn := $fv2T[$idxSyn]
         ))
         index := index + 1
-  --  evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+      evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
 
-  -- -- -- --logInfo m! "Collected {collected}"
+  -- --logInfo m! "Collected {collected}"
   evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
   after ← getGoals
 
@@ -1701,117 +1854,23 @@ elab_rules : tactic
 -- lemma BitVec.ofNat_sub  {bw x y : ℕ}  (h : y ≥ x)  (h2: y < 2 ^ bw)  :
 --   BitVec.ofNat bw (y - x) = (BitVec.ofNat bw y) - (BitVec.ofNat bw x) := by sorry
 
--- set_option maxRecDepth 1048576
--- set_option maxHeartbeats  20000000000000000000
--- set_option exponentiation.threshold 900
--- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
--- instance : Fact (Nat.Prime ffff0) := by sorry
--- instance : Fact (NeZero ffff0) := by sorry
--- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
--- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
--- abbrev f := FF0
 
+--   -- bv_decide (config := {timeout := 300})
+--   focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1,
+--   h10_1, h11_1, h12_1, h13_1, h14_1, h15_1, h16_1, h17_1, h18_1, h19_1,
+--   h20_1, h21_1, h22_1, h23_1, h24_1, h25_1, h26_1, h27_1, h28_1, h29_1,
+--   h30_1, h31_1, h32_1, h33_1, h34_1, h35_1, h36_1, h37_1, h38_1, h39_1,
+--   h40_1, h41_1, h42_1, h43_1, h44_1, h45_1, h46_1, h47_1, h48_1, h49_1,
+--   h50_1, h51_1, h52_1, h53_1, h54_1, h55_1, h56_1, h57_1, h58_1, h59_1,
+--   h60_1, h61_1, h62_1, h63_1, h64_1]
 
-
-
-
-
-
--- def VirtualAssertLTE_32 [Field f] : Subtable f 64 :=
---   subtableFromMLE (fun x => 0 + (1 - x[0])*x[1]*1 + (1 - x[2])*x[3]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1])) + (1 - x[4])*x[5]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3])) + (1 - x[6])*x[7]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5])) + (1 - x[8])*x[9]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7])) + (1 - x[10])*x[11]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9])) + (1 - x[12])*x[13]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11])) + (1 - x[14])*x[15]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13])) + (1 - x[16])*x[17]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15])) + (1 - x[18])*x[19]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17])) + (1 - x[20])*x[21]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19])) + (1 - x[22])*x[23]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21])) + (1 - x[24])*x[25]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23])) + (1 - x[26])*x[27]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25])) + (1 - x[28])*x[29]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27])) + (1 - x[30])*x[31]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29])) + (1 - x[32])*x[33]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31])) + (1 - x[34])*x[35]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33])) + (1 - x[36])*x[37]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35])) + (1 - x[38])*x[39]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37])) + (1 - x[40])*x[41]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39])) + (1 - x[42])*x[43]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41])) + (1 - x[44])*x[45]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43])) + (1 - x[46])*x[47]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45])) + (1 - x[48])*x[49]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47])) + (1 - x[50])*x[51]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49])) + (1 - x[52])*x[53]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49]))*(x[50]*x[51] + (1 - x[50])*(1 - x[51])) + (1 - x[54])*x[55]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49]))*(x[50]*x[51] + (1 - x[50])*(1 - x[51]))*(x[52]*x[53] + (1 - x[52])*(1 - x[53])) + (1 - x[56])*x[57]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49]))*(x[50]*x[51] + (1 - x[50])*(1 - x[51]))*(x[52]*x[53] + (1 - x[52])*(1 - x[53]))*(x[54]*x[55] + (1 - x[54])*(1 - x[55])) + (1 - x[58])*x[59]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49]))*(x[50]*x[51] + (1 - x[50])*(1 - x[51]))*(x[52]*x[53] + (1 - x[52])*(1 - x[53]))*(x[54]*x[55] + (1 - x[54])*(1 - x[55]))*(x[56]*x[57] + (1 - x[56])*(1 - x[57])) + (1 - x[60])*x[61]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49]))*(x[50]*x[51] + (1 - x[50])*(1 - x[51]))*(x[52]*x[53] + (1 - x[52])*(1 - x[53]))*(x[54]*x[55] + (1 - x[54])*(1 - x[55]))*(x[56]*x[57] + (1 - x[56])*(1 - x[57]))*(x[58]*x[59] + (1 - x[58])*(1 - x[59])) + (1 - x[62])*x[63]*1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49]))*(x[50]*x[51] + (1 - x[50])*(1 - x[51]))*(x[52]*x[53] + (1 - x[52])*(1 - x[53]))*(x[54]*x[55] + (1 - x[54])*(1 - x[55]))*(x[56]*x[57] + (1 - x[56])*(1 - x[57]))*(x[58]*x[59] + (1 - x[58])*(1 - x[59]))*(x[60]*x[61] + (1 - x[60])*(1 - x[61])) + 1*(x[0]*x[1] + (1 - x[0])*(1 - x[1]))*(x[2]*x[3] + (1 - x[2])*(1 - x[3]))*(x[4]*x[5] + (1 - x[4])*(1 - x[5]))*(x[6]*x[7] + (1 - x[6])*(1 - x[7]))*(x[8]*x[9] + (1 - x[8])*(1 - x[9]))*(x[10]*x[11] + (1 - x[10])*(1 - x[11]))*(x[12]*x[13] + (1 - x[12])*(1 - x[13]))*(x[14]*x[15] + (1 - x[14])*(1 - x[15]))*(x[16]*x[17] + (1 - x[16])*(1 - x[17]))*(x[18]*x[19] + (1 - x[18])*(1 - x[19]))*(x[20]*x[21] + (1 - x[20])*(1 - x[21]))*(x[22]*x[23] + (1 - x[22])*(1 - x[23]))*(x[24]*x[25] + (1 - x[24])*(1 - x[25]))*(x[26]*x[27] + (1 - x[26])*(1 - x[27]))*(x[28]*x[29] + (1 - x[28])*(1 - x[29]))*(x[30]*x[31] + (1 - x[30])*(1 - x[31]))*(x[32]*x[33] + (1 - x[32])*(1 - x[33]))*(x[34]*x[35] + (1 - x[34])*(1 - x[35]))*(x[36]*x[37] + (1 - x[36])*(1 - x[37]))*(x[38]*x[39] + (1 - x[38])*(1 - x[39]))*(x[40]*x[41] + (1 - x[40])*(1 - x[41]))*(x[42]*x[43] + (1 - x[42])*(1 - x[43]))*(x[44]*x[45] + (1 - x[44])*(1 - x[45]))*(x[46]*x[47] + (1 - x[46])*(1 - x[47]))*(x[48]*x[49] + (1 - x[48])*(1 - x[49]))*(x[50]*x[51] + (1 - x[50])*(1 - x[51]))*(x[52]*x[53] + (1 - x[52])*(1 - x[53]))*(x[54]*x[55] + (1 - x[54])*(1 - x[55]))*(x[56]*x[57] + (1 - x[56])*(1 - x[57]))*(x[58]*x[59] + (1 - x[58])*(1 - x[59]))*(x[60]*x[61] + (1 - x[60])*(1 - x[61]))*(x[62]*x[63] + (1 - x[62])*(1 - x[63])))
-
-
--- lemma assert_lte_32_mle_one_chunk_[ZKField f] (bv1 bv2 : BitVec 32) (fv1 fv2 : Vector f 32) :
---   some bvoutput = BVModEq.map_f_to_bv 32 foutput ->
---    some (BVModEq.bool_to_bv 32 bv1[31])  = BVModEq.map_f_to_bv 32 fv1[0]  ->
---    some (BVModEq.bool_to_bv 32 bv2[31]) = BVModEq.map_f_to_bv 32 fv1[1]  ->
---    some (BVModEq.bool_to_bv 32 bv1[30]) = BVModEq.map_f_to_bv 32 fv1[2]  ->
---    some (BVModEq.bool_to_bv 32 bv2[30]) = BVModEq.map_f_to_bv 32 fv1[3]  ->
---    some (BVModEq.bool_to_bv 32 bv1[29]) = BVModEq.map_f_to_bv 32 fv1[4]  ->
---    some (BVModEq.bool_to_bv 32 bv2[29]) = BVModEq.map_f_to_bv 32 fv1[5]  ->
---    some (BVModEq.bool_to_bv 32 bv1[28]) = BVModEq.map_f_to_bv 32 fv1[6]  ->
---    some (BVModEq.bool_to_bv 32 bv2[28]) = BVModEq.map_f_to_bv 32 fv1[7]  ->
---    some (BVModEq.bool_to_bv 32 bv1[27])  = BVModEq.map_f_to_bv 32 fv1[8]  ->
---    some (BVModEq.bool_to_bv 32 bv2[27]) = BVModEq.map_f_to_bv 32 fv1[9]  ->
---    some (BVModEq.bool_to_bv 32 bv1[26]) = BVModEq.map_f_to_bv 32 fv1[10]  ->
---    some (BVModEq.bool_to_bv 32 bv2[26]) = BVModEq.map_f_to_bv 32 fv1[11]  ->
---    some (BVModEq.bool_to_bv 32 bv1[25]) = BVModEq.map_f_to_bv 32 fv1[12]  ->
---    some (BVModEq.bool_to_bv 32 bv2[25]) = BVModEq.map_f_to_bv 32 fv1[13]  ->
---    some (BVModEq.bool_to_bv 32 bv1[24]) = BVModEq.map_f_to_bv 32 fv1[14]  ->
---    some (BVModEq.bool_to_bv 32 bv2[24]) = BVModEq.map_f_to_bv 32 fv1[15]  ->
---    some (BVModEq.bool_to_bv 32 bv1[23])  = BVModEq.map_f_to_bv 32 fv1[16]  ->
---    some (BVModEq.bool_to_bv 32 bv2[23]) = BVModEq.map_f_to_bv 32 fv1[17]  ->
---    some (BVModEq.bool_to_bv 32 bv1[22]) = BVModEq.map_f_to_bv 32 fv1[18]  ->
---    some (BVModEq.bool_to_bv 32 bv2[22]) = BVModEq.map_f_to_bv 32 fv1[19]  ->
---    some (BVModEq.bool_to_bv 32 bv1[21]) = BVModEq.map_f_to_bv 32 fv1[20]  ->
---    some (BVModEq.bool_to_bv 32 bv2[21]) = BVModEq.map_f_to_bv 32 fv1[21]  ->
---    some (BVModEq.bool_to_bv 32 bv1[20]) = BVModEq.map_f_to_bv 32 fv1[22]  ->
---    some (BVModEq.bool_to_bv 32 bv2[20]) = BVModEq.map_f_to_bv 32 fv1[23]  ->
---    some (BVModEq.bool_to_bv 32 bv1[19])  = BVModEq.map_f_to_bv 32 fv1[24]  ->
---    some (BVModEq.bool_to_bv 32 bv2[19]) = BVModEq.map_f_to_bv 32 fv1[25]  ->
---    some (BVModEq.bool_to_bv 32 bv1[18]) = BVModEq.map_f_to_bv 32 fv1[26]  ->
---    some (BVModEq.bool_to_bv 32 bv2[18]) = BVModEq.map_f_to_bv 32 fv1[27]  ->
---    some (BVModEq.bool_to_bv 32 bv1[17]) = BVModEq.map_f_to_bv 32 fv1[28]  ->
---    some (BVModEq.bool_to_bv 32 bv2[17]) = BVModEq.map_f_to_bv 32 fv1[29]  ->
---    some (BVModEq.bool_to_bv 32 bv1[16]) = BVModEq.map_f_to_bv 32 fv1[30]  ->
---    some (BVModEq.bool_to_bv 32 bv2[16]) = BVModEq.map_f_to_bv 32 fv1[31]  ->
---   some (BVModEq.bool_to_bv 32 bv1[15])  = BVModEq.map_f_to_bv 32 fv2[0]  ->
---    some (BVModEq.bool_to_bv 32 bv2[15]) = BVModEq.map_f_to_bv 32 fv2[1]  ->
---    some (BVModEq.bool_to_bv 32 bv1[14]) = BVModEq.map_f_to_bv 32 fv2[2]  ->
---    some (BVModEq.bool_to_bv 32 bv2[14]) = BVModEq.map_f_to_bv 32 fv2[3]  ->
---    some (BVModEq.bool_to_bv 32 bv1[13]) = BVModEq.map_f_to_bv 32 fv2[4]  ->
---    some (BVModEq.bool_to_bv 32 bv2[13]) = BVModEq.map_f_to_bv 32 fv2[5]  ->
---    some (BVModEq.bool_to_bv 32 bv1[12]) = BVModEq.map_f_to_bv 32 fv2[6]  ->
---    some (BVModEq.bool_to_bv 32 bv2[12]) = BVModEq.map_f_to_bv 32 fv2[7]  ->
---   some (BVModEq.bool_to_bv 32 bv1[11]) = BVModEq.map_f_to_bv 32 fv2[8]  ->
---   some (BVModEq.bool_to_bv 32 bv2[11]) = BVModEq.map_f_to_bv 32 fv2[9]  ->
---   some (BVModEq.bool_to_bv 32 bv1[10]) = BVModEq.map_f_to_bv 32  fv2[10]  ->
---   some (BVModEq.bool_to_bv 32 bv2[10]) = BVModEq.map_f_to_bv 32 fv2[11]  ->
---   some (BVModEq.bool_to_bv 32 bv1[9]) = BVModEq.map_f_to_bv 32 fv2[12]  ->
---   some (BVModEq.bool_to_bv 32 bv2[9]) = BVModEq.map_f_to_bv 32 fv2[13]  ->
---   some (BVModEq.bool_to_bv 32 bv1[8]) = BVModEq.map_f_to_bv 32 fv2[14]  ->
---   some (BVModEq.bool_to_bv 32 bv2[8]) = BVModEq.map_f_to_bv 32 fv2[15]  ->
---    some (BVModEq.bool_to_bv 32 bv1[7])  = BVModEq.map_f_to_bv 32 fv2[16]  ->
---    some (BVModEq.bool_to_bv 32 bv2[7]) = BVModEq.map_f_to_bv 32 fv2[17]  ->
---    some (BVModEq.bool_to_bv 32 bv1[6]) = BVModEq.map_f_to_bv 32 fv2[18]  ->
---    some (BVModEq.bool_to_bv 32 bv2[6]) = BVModEq.map_f_to_bv 32 fv2[19]  ->
---    some (BVModEq.bool_to_bv 32 bv1[5]) = BVModEq.map_f_to_bv 32 fv2[20]  ->
---    some (BVModEq.bool_to_bv 32 bv2[5]) = BVModEq.map_f_to_bv 32 fv2[21]  ->
---    some (BVModEq.bool_to_bv 32 bv1[4]) = BVModEq.map_f_to_bv 32 fv2[22]  ->
---    some (BVModEq.bool_to_bv 32 bv2[4]) = BVModEq.map_f_to_bv 32 fv2[23]  ->
---   some (BVModEq.bool_to_bv 32 bv1[3]) = BVModEq.map_f_to_bv 32 fv2[24]  ->
---   some (BVModEq.bool_to_bv 32 bv2[3]) = BVModEq.map_f_to_bv 32 fv2[25]  ->
---   some (BVModEq.bool_to_bv 32 bv1[2]) = BVModEq.map_f_to_bv 32  fv2[26]  ->
---   some (BVModEq.bool_to_bv 32 bv2[2]) = BVModEq.map_f_to_bv 32 fv2[27]  ->
---   some (BVModEq.bool_to_bv 32 bv1[1]) = BVModEq.map_f_to_bv 32 fv2[28]  ->
---   some (BVModEq.bool_to_bv 32 bv2[1]) = BVModEq.map_f_to_bv 32 fv2[29]  ->
---   some (BVModEq.bool_to_bv 32 bv1[0]) = BVModEq.map_f_to_bv 32 fv2[30]  ->
---   some (BVModEq.bool_to_bv 32 bv2[0]) = BVModEq.map_f_to_bv 32 fv2[31]  ->
---   (bvoutput = BVModEq.bool_to_bv 32 (bv1 <= bv2))
---   =
---   (foutput = evalSubtable VirtualAssertLTE_32 (Vector.append fv1 fv2))
--- := by
---   unfold VirtualAssertLTE_32
---   unfold evalSubtable
---   unfold subtableFromMLE
---   unfold Vector.append
---   translate_all false
-  -- bv_decide (config := {timeout := 300})
-  -- focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1,
-  -- h10_1, h11_1, h12_1, h13_1, h14_1, h15_1, h16_1, h17_1, h18_1, h19_1,
-  -- h20_1, h21_1, h22_1, h23_1, h24_1, h25_1, h26_1, h27_1, h28_1, h29_1,
-  -- h30_1, h31_1, h32_1, h33_1, h34_1, h35_1, h36_1, h37_1, h38_1, h39_1,
-  -- h40_1, h41_1, h42_1, h43_1, h44_1, h45_1, h46_1, h47_1, h48_1, h49_1,
-  -- h50_1, h51_1, h52_1, h53_1, h54_1, h55_1, h56_1, h57_1, h58_1, h59_1,
-  -- h60_1, h61_1, h62_1, h63_1, h64_1]
-  -- rw [Nat.mod_eq_of_lt]
-  -- focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1,
-  -- h10_1, h11_1, h12_1, h13_1, h14_1, h15_1, h16_1, h17_1, h18_1, h19_1,
-  -- h20_1, h21_1, h22_1, h23_1, h24_1, h25_1, h26_1, h27_1, h28_1, h29_1,
-  -- h30_1, h31_1, h32_1, h33_1, h34_1, h35_1, h36_1, h37_1, h38_1, h39_1,
-  -- h40_1, h41_1, h42_1, h43_1, h44_1, h45_1, h46_1, h47_1, h48_1, h49_1,
-  -- h50_1, h51_1, h52_1, h53_1, h54_1, h55_1, h56_1, h57_1, h58_1, h59_1,
-  -- h60_1, h61_1, h62_1, h63_1, h64_1]
+--   focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1,
+--   h10_1, h11_1, h12_1, h13_1, h14_1, h15_1, h16_1, h17_1, h18_1, h19_1,
+--   h20_1, h21_1, h22_1, h23_1, h24_1, h25_1, h26_1, h27_1, h28_1, h29_1,
+--   h30_1, h31_1, h32_1, h33_1, h34_1, h35_1, h36_1, h37_1, h38_1, h39_1,
+--   h40_1, h41_1, h42_1, h43_1, h44_1, h45_1, h46_1, h47_1, h48_1, h49_1,
+--   h50_1, h51_1, h52_1, h53_1, h54_1, h55_1, h56_1, h57_1, h58_1, h59_1,
+--   h60_1, h61_1, h62_1, h63_1, h64_1]
   -- focus try_apply_lemma_hyps [h0_new, h1_1, h2_1, h3_1, h4_1, h5_1, h6_1, h7_1, h8_1, h9_1,
   -- h10_1, h11_1, h12_1, h13_1, h14_1, h15_1, h16_1, h17_1, h18_1, h19_1,
   -- h20_1, h21_1, h22_1, h23_1, h24_1, h25_1, h26_1, h27_1, h28_1, h29_1,
