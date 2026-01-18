@@ -1155,11 +1155,11 @@ partial def loopUntilDone
     `(true)
   else
     `(false)
-  logInfo m!"What {t2}"
+  --logInfo m!"What {t2}"
   let t2 ← withReducible <| whnf t2
   let res ← g.withContext do
       firstCompositeInsideBV? seen t2
-  logInfo m!"How {res}"
+  --logInfo m!"How {res}"
   match res with
   | none =>
       logInfo "✅ Done — no composite expressions left inside any `if`."
