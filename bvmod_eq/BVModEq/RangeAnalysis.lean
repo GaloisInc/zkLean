@@ -1204,8 +1204,8 @@ elab_rules : tactic
                     logInfo "❌ try_apply_lemma_hyps did NOT solve the isolated goal"
                     throwError m! "try_apply failed {after}"
         catch e =>
-               --pure ()
-               logInfo m! "Could not remove mod {e.toMessageData}?"
+              pure ()
+               --logInfo m! "Could not remove mod {e.toMessageData}?"
                 --modLoop := false
 
       --   evalTactic (← `(tactic| try simp))
@@ -1332,12 +1332,12 @@ elab_rules : tactic
               --logInfo m!"✅ Fully solved goal using decide {goalType}"
               return { didMux := false, madeProgress := true, goals := [g] , leftSide := false, stopCompletely:= false}
           catch _err =>
-              logInfo m! "Decide failed on {g}"
+              --logInfo m! "Decide failed on {g}"
               return { didMux := false, madeProgress := false, goals := [g] , leftSide := false, stopCompletely:= true}
         -- last shot try simp
 
         try
-          logInfo m!"We are here?"
+          --logInfo m!"We are here?"
           monadLift $ do evalTactic (← `(tactic|  focus
                   (split_ifs; all_goals simp ) ))
           if ← g.isAssigned then
@@ -1411,6 +1411,121 @@ elab_rules : tactic
  -- evalTactic (← `(tactic| try simp only [hMux]))
  -- evalTactic (← `(tactic| try simp ))
  -- evalTactic (← `(tactic| rw [Nat.mux_if_then] at ⊢))
+
+
+
+def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
+    let ty ← instantiateMVars ty
+    --let ty ← whnf ty
+    let (fn, args) := ty.getAppFnArgs
+    -- extract the two sides of a relation (we consistently take the last two args)
+    let sides? : Option (Expr × Expr) :=
+      match fn with
+      | ``Eq    => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | ``LT.lt  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      |  ``LE.le  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | ``GT.gt  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | ``GE.ge  => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
+      | _ => none
+    match sides? with
+    | none => pure (none)
+    | some (lhs, rhs) =>
+        -- get `% n` modulus if expression is `Nat.mod _ n` with numeral n
+        let getModLit (e : Expr) :  MetaM (Option (Expr × Nat)) := do
+          --let e ← whnf e
+
+          let (f, as) := e.getAppFnArgs
+
+          match f with
+          | ``HMod.hMod =>
+              if h : as.size >= 2 then
+
+                let (f2, as2) := as[as.size-1].getAppFnArgs
+                match f2 with
+                | ``OfNat.ofNat =>
+
+                   match as2[as2.size-2]! with
+                      | Expr.lit (Literal.natVal n) => pure (some (as[as.size-2], n))
+                      | _ => pure ( none )
+                   --pure (some 2)
+                | _ => pure none
+              else
+                pure none
+          | _ => pure none
+
+        let ml ← getModLit lhs
+        let mr ← getModLit rhs
+        match ml, mr with
+        | some n, none   => pure (some n)
+        | none,   some n => pure (some n)
+        | _,      _      => pure none
+
+
+
+
+/--
+`dbg_mod k` where `k` is a Nat literal.
+
+If the current goal `G` has an *external* modulus `exp % n` on exactly one side
+(and the other side contains no `%` anywhere), and `k < n`, then:
+
+• creates a new goal   `exp < k`
+• replaces the main goal with `exp < k → G`
+
+Otherwise does nothing.
+-/
+elab "dbg_mod" k:num : tactic => do
+  withMainContext do
+    let k : Nat := k.getNat
+
+    let g ← getMainGoal
+    let goalTy ← g.getType
+
+     match (← externalModulusOneSide? goalTy) with
+    | none => pure ()
+    | some (exp, n) =>
+        if k < n then
+        -- A : Prop := exp < k
+          let A : Expr := mkApp2 (mkConst ``Nat.lt) exp (mkNatLit k)
+
+          -- pr : ?m : A  (this will become the "prove A" subgoal)
+          let pr ← g.withContext do mkFreshExprMVar (some A)
+
+          -- add hypothesis hmod : A := pr to the original goal context
+          let gWithHyp ← g.withContext do
+            -- NOTE: in your Lean, `assert` is MetaM, so lift it:
+            liftMetaM <| g.assert (Name.mkSimple "hmod") A pr
+
+          -- prove A first, then solve original goal with hmod available
+          setGoals [pr.mvarId!, gWithHyp]
+        else
+          pure ()
+
+/- quick tests -/
+-- example (x : ZMod 7) : x.val % 200 < 4 := by
+--   dbg_mod   -- prints: external modulus? (some 200)
+
+
+-- example (x  : Nat) (h: x< 2): (x % 200 ) < 2 := by
+--   dbg_mod  2 -- prints: external modulus? none
+--   simp
+--   apply h
+--   simp
+--   intro h
+--   rw [Nat.mod_eq_of_lt]
+--   apply h
+--   apply lt_of_lt_of_le h (by decide)
+
+
+
+-- example (x : Nat) : x % 200 = 3 := by
+--   dbg_mod   -- prints: external modulus? (some 200)
+
+
+-- example (x : Nat) : x % 200 ≥ 3 := by
+--   dbg_mod   -- prints: external modulus? (some 200)
+
+
 
 -- lemma aaa1 {a b : BitVec 3} :
 -- (((if a[0] = true then 1 else 0) +

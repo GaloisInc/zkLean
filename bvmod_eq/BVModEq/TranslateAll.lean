@@ -433,6 +433,13 @@ elab_rules : tactic
             evalTactic (← `(tactic| swap ))
             let hcTerm  : TSyntax `term  := ⟨mkIdent `proof⟩
             evalTactic (← `(tactic| apply lt_of_lt_of_le $hcTerm (by decide)))
+            let bitsize := ceilLog2 k
+            let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
+            evalTactic (← `(tactic|  rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
+            evalTactic (← `(tactic| swap ))
+            evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
+            evalTactic (← `(tactic| swap ))
+            evalTactic (← `(tactic| apply $hcTerm))
         else
           pure ()
 
@@ -1167,7 +1174,7 @@ partial def loopUntilDone (flag: Bool) (hs : Array (TSyntax `ident)) (count: Nat
                 try
                   evalTactic (← `(tactic|  rw [$hcRw ]))
                 catch e  =>
-                  logInfo m!"{e.toMessageData}"
+                  --logInfo m!"{e.toMessageData}"
                   progress := false
               evalTactic (← `(tactic|  try simp [$hcIdStx]))
         loopUntilDone flag hs (count +1)
@@ -1328,12 +1335,12 @@ elab_rules : tactic
   let mut rmFailed := false
   try
       evalTactic (← `(tactic| dbg_mod $bitsizeStx_full [$[$ids],*]))
-      let hcTerm  : TSyntax `term  := ⟨mkIdent `proof⟩
-      evalTactic (← `(tactic|  rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
-      evalTactic (← `(tactic| swap ))
-      evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
-      evalTactic (← `(tactic| swap ))
-      evalTactic (← `(tactic| apply $hcTerm))
+      -- let hcTerm  : TSyntax `term  := ⟨mkIdent `proof⟩
+      -- evalTactic (← `(tactic|  rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
+      -- evalTactic (← `(tactic| swap ))
+      -- evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
+      -- evalTactic (← `(tactic| swap ))
+      -- evalTactic (← `(tactic| apply $hcTerm))
 
         -- evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
         -- let cur_g ← getGoals
@@ -1353,7 +1360,7 @@ elab_rules : tactic
         --     else
         --       throwError m! "try_apply failed {after}"
   catch e =>
-      logInfo m!"{e.toMessageData}"
+      --logInfo m!"{e.toMessageData}"
       rmFailed := true
 
 
