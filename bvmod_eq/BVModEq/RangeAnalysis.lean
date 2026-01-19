@@ -594,8 +594,10 @@ macro_rules
 
 def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
   let decTy ← Meta.inferType cond0
+  --logInfo m!"IF Lemma"
   try
     if (decTy.getAppApps.size != 0) then
+      --logInfo m!"split prop"
       let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
       monadLift $ do evalTactic (← `(tactic| split_prop_if $condSyn))
       loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false}
@@ -717,7 +719,7 @@ def applyNatLeRefl2  (loopBodyReturn : LoopBodyLabel) (g : MVarId) (goalType : E
       | _ => throwError m!"not a Nat <=?"
     loopBodyReturn.apply { didMux := false, madeProgress := true, goals := subgoals,  leftSide := leftSide, stopCompletely:= false }
   catch e =>
-    --logInfo m! "{e.toMessageData}"
+    logInfo m! "{e.toMessageData}"
     applyThisLemma loopBodyReturn g goalType leftSide stx
 
 
@@ -887,7 +889,7 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
   let (fn, args) := mainGoalType.getAppFnArgs
   --logInfo m! "{args[args.size-1]!} => {containsMVar args[args.size-1]!}"
 
-  --logInfo m! "Args 1: {args[1]!}"
+  --logInfo m! "Here?"
   let mut leftSide := false
 
   --logInfo m! "UNFOLDED: {unfolded}"
@@ -904,99 +906,17 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
   let fn3 := unfolded.getAppFn
   --logInfo m! "LEFTHS: {leftSide} for {mainGoalType}"
   if (terms.size > 0) then
+     --logInfo m! "Some terms!"
     -- if we have variables then we can apply < C --> <= m?
-  match fn with
+      match fn with
 
-    | ``LT.lt =>
-      match fn3 with
-      | Expr.const name _ =>
-        match name with
-        | ``ite =>
-            let iteArgs := unfolded.getAppArgs
-            if iteArgs.size == 5 then
-                let cond := iteArgs[2]!
-                let t    := iteArgs[3]!
-                let e    := iteArgs[4]!
-
-
-                --   -- Boolean IF → split_ifs
-                applyIfLemma loopBodyReturn cond
-              else
-                -- unexpected shape
-                pure ()
-        | ``OfNat.ofNat => pure ()
-        | _ => applyThisLemma lt
-      | _ => pure ()
-    | _ => pure ()
- -- logInfo m! "here?"
-  match fn with
-  | ``LE.le =>
-   -- logInfo m! "here!"
-    if containsMVar mainGoalType then
-     -- logInfo m! "here?{fn3}"
-      match fn3 with
-        | Expr.const name _ =>
-          match name with
-          | ``HSub.hSub =>
-             if leftSide then
-                applyThisLemma subL
-             else
-                applyThisLemma sub
-          | ``HAdd.hAdd => applyThisLemma add
-          | ``HMul.hMul => applyThisLemma mul
-          | ``HMod.hMod => applyThisLemma modLemma
-          --| ``OfNat.ofNat => applyThisLemma rfl
-          -- rfl is a place holder should be something else
-          | ``ite =>
-
-              let iteArgs := unfolded.getAppArgs
-              if iteArgs.size == 5 then
-                let cond := iteArgs[2]!
-                let t    := iteArgs[3]!
-                let e    := iteArgs[4]!
-
-
-                --   -- Boolean IF → split_ifs
-                applyIfLemma loopBodyReturn cond
-              else
-                -- unexpected shape
-                pure ()
-          | ``ZMod.val =>
-              if !leftSide then
-                applyZModLemma loopBodyReturn g mainGoalType leftSide hyps
-              else
-                applyThisLemma zmodGT
-          | ``BitVec.toNat =>
-            --logInfo m! "No?"
-            if exprHasMod mainGoalType then
-              applyThisLemma modLemma
-            else
-              if !leftSide then
-                applyThisLemma bitvecLT
-              else
-                applyThisLemma bitvecGT
-          | _ =>
-              --logInfo m!"{name}"
-              pure ()
-        | _ =>
-          if fn3.isFVar then applyZModLemma loopBodyReturn g mainGoalType leftSide hyps
-    else
-      --logInfo m! "here2 {fn3}"
-        --logInfo m! "{args[args.size-1]!.getAppFn}"
-         match fn3 with
+        | ``LT.lt =>
+          match fn3 with
           | Expr.const name _ =>
             match name with
-            | ``OfNat.ofNat => applyThisLemma constLeq
-            -- | ``BitVec.toNat =>
-            --     if exprHasMod mainGoalType then
-            --         applyThisLemma modLemma
-            --     else
-            --         logInfo m! "here3"
-            --         applyThisLemma  bitvec
-            --| ``HMod.hMod => applyThisLemma  modLemma
-            | ``ite   =>
+            | ``ite =>
                 let iteArgs := unfolded.getAppArgs
-                  if iteArgs.size == 5 then
+                if iteArgs.size == 5 then
                     let cond := iteArgs[2]!
                     let t    := iteArgs[3]!
                     let e    := iteArgs[4]!
@@ -1007,18 +927,103 @@ def findAndApplyRangeAnalysisLemma (loopBodyReturn : LoopBodyLabel)
                   else
                     -- unexpected shape
                     pure ()
-            | _ =>
-             -- logInfo m! "Why are we not here?"
-              if terms.size >= 1 then
-                applyThisLemma expLeq
-              else
-                pure ()
-          | _ =>
-           --logInfo m! "Because we are here?"
-           pure ()
-    | _ =>
-      --logInfo m! "{fn}"
-      pure ()
+            | ``OfNat.ofNat => pure ()
+            | _ => applyThisLemma lt
+          | _ => pure ()
+        | _ => pure ()
+    -- logInfo m! "here?"
+      match fn with
+        | ``LE.le =>
+        -- logInfo m! "here!"
+          if containsMVar mainGoalType then
+          -- logInfo m! "here?{fn3}"
+            match fn3 with
+              | Expr.const name _ =>
+                match name with
+                | ``HSub.hSub =>
+                  if leftSide then
+                      applyThisLemma subL
+                  else
+                      applyThisLemma sub
+                | ``HAdd.hAdd => applyThisLemma add
+                | ``HMul.hMul => applyThisLemma mul
+                | ``HMod.hMod => applyThisLemma modLemma
+                --| ``OfNat.ofNat => applyThisLemma rfl
+                -- rfl is a place holder should be something else
+                | ``ite =>
+
+                    let iteArgs := unfolded.getAppArgs
+                    if iteArgs.size == 5 then
+                      let cond := iteArgs[2]!
+                      let t    := iteArgs[3]!
+                      let e    := iteArgs[4]!
+
+
+                      --   -- Boolean IF → split_ifs
+                      applyIfLemma loopBodyReturn cond
+                    else
+                      -- unexpected shape
+                      pure ()
+                | ``ZMod.val =>
+                    if !leftSide then
+                      applyZModLemma loopBodyReturn g mainGoalType leftSide hyps
+                    else
+                      applyThisLemma zmodGT
+                | ``BitVec.toNat =>
+                  --logInfo m! "No?"
+                  if exprHasMod mainGoalType then
+                    applyThisLemma modLemma
+                  else
+                    if !leftSide then
+                      applyThisLemma bitvecLT
+                    else
+                      applyThisLemma bitvecGT
+                | _ =>
+                    --logInfo m!"{name}"
+                    pure ()
+              | _ =>
+                if fn3.isFVar then applyZModLemma loopBodyReturn g mainGoalType leftSide hyps
+        --| _ => pure ()
+
+          else
+              --logInfo m! "here2 {fn3}"
+                --logInfo m! "{args[args.size-1]!.getAppFn}"
+                match fn3 with
+                  | Expr.const name _ =>
+                    match name with
+                    | ``OfNat.ofNat => applyThisLemma constLeq
+                    -- | ``BitVec.toNat =>
+                    --     if exprHasMod mainGoalType then
+                    --         applyThisLemma modLemma
+                    --     else
+                    --         logInfo m! "here3"
+                    --         applyThisLemma  bitvec
+                    --| ``HMod.hMod => applyThisLemma  modLemma
+                    | ``ite   =>
+                        let iteArgs := unfolded.getAppArgs
+                          if iteArgs.size == 5 then
+                            let cond := iteArgs[2]!
+                            let t    := iteArgs[3]!
+                            let e    := iteArgs[4]!
+
+
+                            --   -- Boolean IF → split_ifs
+                            applyIfLemma loopBodyReturn cond
+                          else
+                            -- unexpected shape
+                            pure ()
+                    | _ =>
+                    -- logInfo m! "Why are we not here?"
+                      if terms.size >= 1 then
+                        applyThisLemma expLeq
+                      else
+                        pure ()
+                  | _ =>
+                  --logInfo m! "Because we are here?"
+                  pure ()
+        | _ =>
+        -- m! "{fn}"
+        pure ()
 
 @[tactic tryApplyLemHyps]
 elab_rules : tactic
@@ -1062,7 +1067,7 @@ elab_rules : tactic
   -- as long as we are making progress then continue
   count  := 0
   while (progress  ) do
-    --logInfo m!"we get here? {<-getGoals}"
+    --logInfo m!"we get here? "
     count := count + 1
     if stop_completely then
       logInfo m!"STAP"
@@ -1087,24 +1092,37 @@ elab_rules : tactic
         continue
       setGoals [g] -- focus on one goal at a time
      -- logInfo m! "{g}"
-      -- logInfo m! "GOAL {g}"
+      --logInfo m! "GOAL {g}"
       let goalType ← g.getType
       --logInfo m! "GOALS {<- getGoals}"
       -- first we try to apply hypothesis
       let mut instantiatedGoalType ← instantiateMVars goalType
+
       let (fn, args) := instantiatedGoalType.getAppFnArgs
+       match fn with
+        | ``Eq =>
+          stop_completely := true
+          let gs <- getGoals
+          updatedGoalsReversed := gs ++ updatedGoalsReversed
+          continue
+        | _ => pure ()
       let terms ← collectTerms instantiatedGoalType
       let i := countMinusOps instantiatedGoalType
       -- logInfo m!"HUH{<- firstCompositeInsideVal? instantiatedGoalType}"
-      -- logInfo m!"HUH{i}"
+      --logInfo m!"HUH{i}"
       if (<- firstCompositeInsideVal? instantiatedGoalType) ||  need_to_valify then do
+        --logInfo m!"VAL"
         try
           evalTactic (← `(tactic| valify [$sargs,*]))
           evalTactic (← `(tactic| try simp))
+          --logInfo m!"why?"
           progress := true
           handled := true
-        catch _ => pure ()
+        catch _ =>
+            --logInfo m!"we fail"
+            pure ()
         if i > 0 then
+          --logInfo m!"we go here"
           try
             --for _ in [:i] do
             evalTactic (← `(tactic| try valify [$sargs,*]))
@@ -1120,16 +1138,18 @@ elab_rules : tactic
             continue
               --evalTactic (← `(tactic| nth_rewrite 2 [Nat.mod_eq_of_lt]))
           catch  e =>
+              --logInfo m! "we still fail?"
               --progress := false
               let gs <- getGoals
               updatedGoalsReversed := gs ++ updatedGoalsReversed
               --logInfo m! "FAILED"
-              continue
+              --continue
         else
             let gs <- getGoals
             updatedGoalsReversed := gs ++ updatedGoalsReversed
       else
         if isBitVecType instantiatedGoalType then do
+          --logInfo m!"BITVEC"
           try
             if i == 0 then
               evalTactic (← `(tactic| bvify [$sargs,*]))
@@ -1148,13 +1168,14 @@ elab_rules : tactic
               let gs <- getGoals
               updatedGoalsReversed := gs ++ updatedGoalsReversed
               --logInfo m! "FAILED"
-              continue
+              --continue
       -- UNCOMMENT LATER
       let terms0 ← collectTerms instantiatedGoalType
       -- logInfo m!"{terms0.size}"
       -- logInfo m!"{exprHasMod instantiatedGoalType}"
-      -- logInfo m!"{progress}"
+      --logInfo m!"{progress}"
       if !progress && exprHasMod instantiatedGoalType && !(terms0.size == 0) then
+        --logInfo m!"MOD"
         try
 
           evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
@@ -1229,9 +1250,9 @@ elab_rules : tactic
           --progress := false
           --logInfo m! "but not here?"
           continue
-     -- logInfo m!"umm..."
+      --logInfo m!"umm..."
       let loopBodyResult ← (ContT.run · pure) $ MonadCont.callCC $ fun loopBodyReturn => do
-        --logInfo m!"here? {g}"
+        --logInfo m!"here?"
         if args.size > 3 then
           let g ← getMainGoal
           let goalType ← g.getType
@@ -1258,8 +1279,8 @@ elab_rules : tactic
           --logInfo m!"{ exprHasNestedIf instantiatedGoalType}"
           if exprHasNestedIf instantiatedGoalType then
             let g <- getMainGoal
+            --logInfo m!"DAMMIT"
             try
-              logInfo m!"DAMMIT"
               monadLift $ do evalTactic (← `(tactic| split_ifs))
               let g' <- getMainGoal
 
@@ -1271,9 +1292,11 @@ elab_rules : tactic
           -- for n in terms.toArray do
           --   logInfo m!"{n}"
            --  logInfo m!"✅ Stuck on {goalType} with {terms.size}"
+          --logInfo m!"HERE?"
           if terms.size >= 1 then
             findAndApplyRangeAnalysisLemma loopBodyReturn terms g instantiatedGoalType hyps
           else
+            --logInfo m!"NO TERMS"
             let rfl ← monadLift (m := TacticM) ``(Nat.le_refl)
             let bitvec ← monadLift (m := TacticM) ``(BitVec.toNatLT)
             let modLemma ← monadLift (m := TacticM) ``(mod_le_pred)
@@ -1341,15 +1364,15 @@ elab_rules : tactic
           monadLift $ do evalTactic (← `(tactic|  focus
                   (split_ifs; all_goals simp ) ))
           if ← g.isAssigned then
-            logInfo m!"✅ Fully solved goal using simp {goalType}"
+            --logInfo m!"✅ Fully solved goal using simp {goalType}"
             let mut gs <- getGoals
             return { didMux := false, madeProgress := true, goals := gs , leftSide :=false, stopCompletely:=false}
         catch _err => pure ()
         try
-          logInfo m!"We are here?"
+          --logInfo m!"We are here?"
           monadLift $ do evalTactic (← `(tactic| exact 0 ) )
           if ← g.isAssigned then
-            logInfo m!"✅ Fully solved goal using simp {goalType}"
+            --logInfo m!"✅ Fully solved goal using simp {goalType}"
             let mut gs <- getGoals
             return { didMux := false, madeProgress := true, goals := gs , leftSide :=false, stopCompletely:=false}
         catch _err => pure ()
@@ -1379,7 +1402,7 @@ elab_rules : tactic
     -- traversing an ever-growingly long prefix.
 
     setGoals (updatedGoalsReversed.reverse ++ goalQueue.dList ++ goalQueue.eList.reverse)
-    --logInfo m! "What happened? {<- getGoals}"
+    --logInfo m! "We are done?"
     -- if (!progress) then
     --   try
     --     evalTactic (← `(tactic| omega))
@@ -1463,49 +1486,19 @@ def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
 
 
 
-/--
-`dbg_mod k` where `k` is a Nat literal.
 
-If the current goal `G` has an *external* modulus `exp % n` on exactly one side
-(and the other side contains no `%` anywhere), and `k < n`, then:
-
-• creates a new goal   `exp < k`
-• replaces the main goal with `exp < k → G`
-
-Otherwise does nothing.
--/
-elab "dbg_mod" k:num : tactic => do
-  withMainContext do
-    let k : Nat := k.getNat
-
-    let g ← getMainGoal
-    let goalTy ← g.getType
-
-     match (← externalModulusOneSide? goalTy) with
-    | none => pure ()
-    | some (exp, n) =>
-        if k < n then
-        -- A : Prop := exp < k
-          let A : Expr := mkApp2 (mkConst ``Nat.lt) exp (mkNatLit k)
-
-          -- pr : ?m : A  (this will become the "prove A" subgoal)
-          let pr ← g.withContext do mkFreshExprMVar (some A)
-
-          -- add hypothesis hmod : A := pr to the original goal context
-          let gWithHyp ← g.withContext do
-            -- NOTE: in your Lean, `assert` is MetaM, so lift it:
-            liftMetaM <| g.assert (Name.mkSimple "hmod") A pr
-
-          -- prove A first, then solve original goal with hmod available
-          setGoals [pr.mvarId!, gWithHyp]
-        else
-          pure ()
-
-/- quick tests -/
--- example (x : ZMod 7) : x.val % 200 < 4 := by
---   dbg_mod   -- prints: external modulus? (some 200)
-
-
+-- variable (d : BitVec 2)
+-- variable (c : BitVec 2)
+-- variable (b : BitVec 2)
+-- variable (a : BitVec 2)
+-- example : (if a[0] = (b[0] != (c[0] != d[0])) then 0 else 1) =
+--   if
+--       ((((if a[0] = true then 1#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + if c[0] = true then 1#3 else 0#3) +
+--             if d[0] = true then 1#3 else 0#3)[0] =
+--         true then
+--     1
+--   else 0 := by
+--   try_apply_lemma_hyps []
 -- example (x  : Nat) (h: x< 2): (x % 200 ) < 2 := by
 --   dbg_mod  2 -- prints: external modulus? none
 --   simp
