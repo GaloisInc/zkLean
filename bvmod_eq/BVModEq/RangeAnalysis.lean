@@ -594,7 +594,7 @@ macro_rules
 
 def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
   let decTy ← Meta.inferType cond0
-  logInfo m!"IF Lemma"
+  --logInfo m!"IF Lemma"
   try
     if (decTy.getAppApps.size != 0) then
       --logInfo m!"split prop"
