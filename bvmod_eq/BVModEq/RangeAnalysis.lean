@@ -594,7 +594,7 @@ macro_rules
 
 def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyResult TacticM Unit := do
   let decTy ← Meta.inferType cond0
-  --logInfo m!"IF Lemma"
+  logInfo m!"IF Lemma"
   try
     if (decTy.getAppApps.size != 0) then
       --logInfo m!"split prop"
@@ -1061,12 +1061,12 @@ elab_rules : tactic
     catch _ =>
       cont := false
   evalTactic (← `(tactic| try all_goals simp [Nat.mul_assoc]))
-  --evalTactic (← `(tactic| all_goals try split_ifs))
+
   let mut did_mux := false
   let mut stop_completely := false
   -- as long as we are making progress then continue
   count  := 0
-  while (progress  ) do
+  while (progress ) do
     --logInfo m!"we get here? "
     count := count + 1
     if stop_completely then
@@ -1083,7 +1083,7 @@ elab_rules : tactic
     progress := false
     -- Note: do not use `enqueueAll` as it would need reversing the list
     let mut goalQueue := Std.Queue.mk [] goals
-    while (not handled && not goalQueue.isEmpty ) do
+    while (not handled && not goalQueue.isEmpty  ) do
       count := count + 1
       let mut some (g, rest) := goalQueue.dequeue? | unreachable!
       goalQueue := rest
@@ -1099,13 +1099,20 @@ elab_rules : tactic
       let mut instantiatedGoalType ← instantiateMVars goalType
 
       let (fn, args) := instantiatedGoalType.getAppFnArgs
-       match fn with
-        | ``Eq =>
-          stop_completely := true
-          let gs <- getGoals
-          updatedGoalsReversed := gs ++ updatedGoalsReversed
-          continue
-        | _ => pure ()
+
+      let mut bitblast :=
+        match fn with
+        | ``LT.lt  => false
+        |  ``LE.le  => false
+        | ``GT.gt  => false
+        | ``GE.ge  => false
+        | _ => true
+      if bitblast then
+        stop_completely := true
+        let gs <- getGoals
+        updatedGoalsReversed := gs ++ updatedGoalsReversed
+        continue
+        -- | _ => pure ()
       let terms ← collectTerms instantiatedGoalType
       let i := countMinusOps instantiatedGoalType
       -- logInfo m!"HUH{<- firstCompositeInsideVal? instantiatedGoalType}"
@@ -1115,6 +1122,8 @@ elab_rules : tactic
         try
           evalTactic (← `(tactic| valify [$sargs,*]))
           evalTactic (← `(tactic| try simp))
+          let gs <- getGoals
+          updatedGoalsReversed := gs ++ updatedGoalsReversed
           --logInfo m!"why?"
           progress := true
           handled := true
@@ -1138,15 +1147,14 @@ elab_rules : tactic
             continue
               --evalTactic (← `(tactic| nth_rewrite 2 [Nat.mod_eq_of_lt]))
           catch  e =>
+               pure ()
               --logInfo m! "we still fail?"
               --progress := false
-              let gs <- getGoals
-              updatedGoalsReversed := gs ++ updatedGoalsReversed
+              -- let gs <- getGoals
+              -- updatedGoalsReversed := gs ++ updatedGoalsReversed
               --logInfo m! "FAILED"
               --continue
-        else
-            let gs <- getGoals
-            updatedGoalsReversed := gs ++ updatedGoalsReversed
+
       else
         if isBitVecType instantiatedGoalType then do
           --logInfo m!"BITVEC"
@@ -1279,7 +1287,7 @@ elab_rules : tactic
           --logInfo m!"{ exprHasNestedIf instantiatedGoalType}"
           if exprHasNestedIf instantiatedGoalType then
             let g <- getMainGoal
-            --logInfo m!"DAMMIT"
+            logInfo m!"DAMMIT"
             try
               monadLift $ do evalTactic (← `(tactic| split_ifs))
               let g' <- getMainGoal
@@ -1485,19 +1493,19 @@ def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
 
 
 
-
-
 -- variable (d : BitVec 2)
 -- variable (c : BitVec 2)
 -- variable (b : BitVec 2)
 -- variable (a : BitVec 2)
--- example : (if a[0] = (b[0] != (c[0] != d[0])) then 0 else 1) =
---   if
---       ((((if a[0] = true then 1#3 else 0#3) + if b[0] = true then 1#3 else 0#3) + if c[0] = true then 1#3 else 0#3) +
---             if d[0] = true then 1#3 else 0#3)[0] =
---         true then
---     1
---   else 0 := by
+-- variable (f : BitVec 2)
+-- variable (e : BitVec 2)
+-- example: ¬6#258 * BitVec.ofNat 258 (ZMod.val smt_fresh_1) %
+--           52435875175126190479447740508185965837690552500527637822603658699938581184513#258 =
+--         (52435875175126190479447740508185965837690552500527637822603658699938581184514#258 -
+--             BitVec.ofNat 258 (ZMod.val smt_fresh_2)) %
+--           52435875175126190479447740508185965837690552500527637822603658699938581184513#258 ∨
+--     (a[0] = false → b[0] = false → c[0] = false → d[0] = false → e[0] = false → f[0] = true) ∧ ¬smt_fresh_2 = 0 ∨
+--       ¬smt_fresh_1 = 0 ∧ ¬smt_fresh_2 = 0 := by
 --   try_apply_lemma_hyps []
 -- example (x  : Nat) (h: x< 2): (x % 200 ) < 2 := by
 --   dbg_mod  2 -- prints: external modulus? none
