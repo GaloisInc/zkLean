@@ -1428,7 +1428,7 @@ elab_rules : tactic
   if goals.isEmpty then
     logInfo m!"SOLVED"
     return
-  logInfo m!"{<-goals[0]!.getType}"
+  --logInfo m!"{<-goals[0]!.getType}"
   let m <- withMainContext do  CalcBitWidth (<-goals[0]!.getType) ids
   --let bitsize :=  ceilLog2 (2^512)
   --logInfo m!"FIRST  {m}"
