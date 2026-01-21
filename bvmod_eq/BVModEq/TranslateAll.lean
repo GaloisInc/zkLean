@@ -51,7 +51,6 @@ private def termFor (nm : Name) : TacticM (TSyntax `term) := withMainContext do
 
 partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat := do
   let e ← withReducible <| whnf e
-  --logInfo m!"{e}"
   let fn  := e.getAppFn
   let args := e.getAppArgs
   if args.isEmpty then
@@ -432,7 +431,7 @@ elab_rules : tactic
           evalTactic (← `(tactic| try simp) )
           withMainContext do
             let g <- getMainGoal
-            --logInfo m!"{g}"
+            logInfo m!"{g}"
             evalTactic (← `(tactic| focus  try_apply_lemma_hyps [$[$ids],*] ))
           evalTactic (← `(tactic| try simp ) )
           let g ← getMainGoal
@@ -457,7 +456,7 @@ elab_rules : tactic
             -- evalTactic (← `(tactic| swap ))
             -- evalTactic (← `(tactic| apply $hcTerm))
         else
-          pure ()
+          throwError "Why is modulus bigger? {k} and {n}"
 
 
 -- /-- Recursively gather all `(width, x)` inside an expression -/
@@ -1418,16 +1417,19 @@ elab_rules : tactic
           progress := false
      -- evalTactic (← `(tactic| try valify [$[$sargs],*]))
 
-  -- --l--ogInfo m! "HERE?"
+  -- -- --l--ogInfo m! "HERE?"
   evalTactic (← `(tactic| try simp   ) )
 
+
+  -- -- --- FOR DEBUGGING REMOVE LATER PLEASE
+  let mut rmFailed := false
+  let seen <- loopUntilDone flag ids (count+1)
   let goals <- getGoals
   if goals.isEmpty then
     logInfo m!"SOLVED"
     return
-  -- --- FOR DEBUGGING REMOVE LATER PLEASE
-
-  let m <- CalcBitWidth (<-goals[0]!.getType) ids
+  logInfo m!"{<-goals[0]!.getType}"
+  let m <- withMainContext do  CalcBitWidth (<-goals[0]!.getType) ids
   --let bitsize :=  ceilLog2 (2^512)
   --logInfo m!"FIRST  {m}"
   let bitsize := ceilLog2 (Nat.max (m+1) 4)
@@ -1436,12 +1438,9 @@ elab_rules : tactic
   let bitsizeStx_full : TSyntax `num := Syntax.mkNumLit (toString bitsize_full)
 
   --logInfo m!"BIT SIZE {bitsize} with {m}"
-  let mut rmFailed := false
-  let seen <- loopUntilDone flag ids (count+1)
 
   try
       evalTactic (← `(tactic| dbg_mod $bitsizeStx_full [$[$ids],*]))
-      --logInfo m!"DBG MOD WORKED?"
       -- let hcTerm  : TSyntax `term  := ⟨mkIdent `proof⟩
       -- evalTactic (← `(tactic|  rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
       -- evalTactic (← `(tactic| swap ))
@@ -1467,7 +1466,7 @@ elab_rules : tactic
       --       else
       --         throwError m! "try_apply failed {after}"
   catch e =>
-      --logInfo m!"ERROR BAD: {e.toMessageData}"
+      logInfo m!"ERROR BAD: {e.toMessageData}"
       pure ()
   --     --rmFailed := true
 
@@ -1676,7 +1675,7 @@ def smartTranslateOne
                   rcases $(mkIdent h.getId):ident with ⟨$(mkIdent h.getId):ident, $newName⟩))
 
                 evalTactic (← `(tactic| try rw [BVModEq.bool_to_bv] at $(mkIdent newName.getId):ident))
-                evalTactic (← `(tactic| try simp at $(mkIdent newName.getId):ident))
+                --evalTactic (← `(tactic| try simp at $(mkIdent newName.getId):ident))
 
 
                 --evalTactic (← `(tactic| translate_hypothesis $h))
@@ -1717,12 +1716,11 @@ def smartTranslateOne
               evalTactic (← `(tactic|
                   rcases $h1:ident with ⟨$h1:ident, $newName⟩))
               evalTactic (← `(tactic| rw [BVModEq.extract_bv_leq] at $h1:ident))
-              evalTactic (← `(tactic|
-                  rcases $h1:ident with ⟨$h1:ident, $newName⟩))
+              -- evalTactic (← `(tactic|
+              --     rcases $h1:ident with ⟨$h1:ident, $newName⟩))
               return (some newName, some h1, none, none)
             catch e =>
                 pure ()
-                --logInfo m!"{e.toMessageData}"
 
 
        return (none, none, none, some h)
@@ -1838,7 +1836,7 @@ elab_rules : tactic
   let varToHypRef ← IO.mkRef ({} : Std.HashMap FVarId (TSyntax `ident))
   let ( collected, changed) := (← smartTranslateMany ids sargs varToHypRef flag)
 
-  -- --colected := collected ++ changed
+  --colected := collected ++ changed
   let mut after ← getGoals
   if after.isEmpty then
     return
@@ -1932,7 +1930,7 @@ elab_rules : tactic
             evalTactic (← `(tactic| split_ands))
 
 
-  --   logInfo m! "Collected {collected}"
+    logInfo m! "Collected {collected}"
   withMainContext do
     evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
   after ← getGoals
@@ -1971,6 +1969,8 @@ elab_rules : tactic
          return
 
 
+
+
 -- set_option maxRecDepth 1048576
 -- set_option maxHeartbeats  20000000000000000000
 -- set_option exponentiation.threshold 900
@@ -1999,9 +1999,11 @@ elab_rules : tactic
 -- lemma correct :
 -- ((((((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit0))) ∧ (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit1))) ∧ (((if (((BVModEq.bool_to_bv 1 a[2]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit2))) ∧ (((if (((BVModEq.bool_to_bv 1 a[3]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit3))) ∧ (((if (((BVModEq.bool_to_bv 1 a[4]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit4))) ∧ (((if (((BVModEq.bool_to_bv 1 a[5]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit5))) ∧ (((if (((BVModEq.bool_to_bv 1 a[6]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit6))) ∧ (((if (((BVModEq.bool_to_bv 1 a[7]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit7))) ∧ (((if (((BVModEq.bool_to_bv 1 a[8]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit8))) ∧ (((if (((BVModEq.bool_to_bv 1 a[9]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit9))) ∧ (((if (((BVModEq.bool_to_bv 1 a[10]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit10))) ∧ (((if (((BVModEq.bool_to_bv 1 a[11]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit11))) ∧ (((if (((BVModEq.bool_to_bv 1 a[12]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit12))) ∧ (((if (((BVModEq.bool_to_bv 1 a[13]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit13))) ∧ (((if (((BVModEq.bool_to_bv 1 a[14]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (x_bit14)))) → (((BVModEq.map_f_to_bv_circ 15  ((x_bit0) + (((x_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit2) * (4 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit3) * (8 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit4) * (16 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit5) * (32 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit6) * (64 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit7) * (128 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit8) * (256 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit9) * (512 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit10) * (1024 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit11) * (2048 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit12) * (4096 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit13) * (8192 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))) + (((x_bit14) * (16384 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (a)))))
 --  := by
---    simp
---    intro h1 h2 h3 h4 h5 h6 h8 h8 h9 h10 h11 h12 h13 h14 h15
---    translate_goal [] false
+--    translate_all [] [] false
+--   --translate_all [] false
+  --  simp
+  --  intro h1 h2 h3 h4 h5 h6 h8 h8 h9 h10 h11 h12 h13 h14 h15
+  --  translate_goal [] false
 
 --    translate_all [] false
 --    try_apply_lemma_hyps []
