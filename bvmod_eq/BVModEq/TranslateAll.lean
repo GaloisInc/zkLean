@@ -431,7 +431,7 @@ elab_rules : tactic
           evalTactic (← `(tactic| try simp) )
           withMainContext do
             let g <- getMainGoal
-            logInfo m!"{g}"
+            --logInfo m!"{g}"
             evalTactic (← `(tactic| focus  try_apply_lemma_hyps [$[$ids],*] ))
           evalTactic (← `(tactic| try simp ) )
           let g ← getMainGoal
@@ -1930,7 +1930,7 @@ elab_rules : tactic
             evalTactic (← `(tactic| split_ands))
 
 
-    logInfo m! "Collected {collected}"
+    --logInfo m! "Collected {collected}"
   withMainContext do
     evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
   after ← getGoals
