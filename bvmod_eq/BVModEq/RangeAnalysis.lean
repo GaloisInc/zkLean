@@ -598,8 +598,15 @@ def applyIfLemma (loopBodyReturn : LoopBodyLabel) (cond0: Expr): ContT LoopBodyR
   try
     if (decTy.getAppApps.size != 0) then
       --logInfo m!"split prop"
+      let g <- getMainGoal
       let condSyn ← monadLift <| Lean.Elab.Term.exprToSyntax decTy.getAppArgs[0]!
       monadLift $ do evalTactic (← `(tactic| split_prop_if $condSyn))
+      let g' <- getMainGoal
+      let t  ← (← g.getType)  |> instantiateMVars
+      let t' ← (← g'.getType) |> instantiateMVars
+      if t == t' then
+          --logInfo m!"why not here?"
+         monadLift $ do evalTactic (← `(tactic| split_ifs))
       loopBodyReturn.apply { didMux := false, madeProgress := true, goals := (← getGoals), leftSide := false, stopCompletely:= false}
     else
       monadLift $ do evalTactic (← `(tactic| split_ifs))
@@ -1490,7 +1497,6 @@ def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
         | some n, none   => pure (some n)
         | none,   some n => pure (some n)
         | _,      _      => pure none
-
 
 
 -- variable (d : BitVec 2)
