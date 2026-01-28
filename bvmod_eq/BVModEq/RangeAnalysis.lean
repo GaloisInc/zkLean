@@ -31,7 +31,8 @@ lemma BitVec.toNatLT {bw} {a : BitVec bw}:
 
 lemma BitVec.toNatGT {bw} {a : BitVec bw}:
  0  <= a.toNat  := by
-  sorry
+   apply (Nat.zero_le a.toNat)
+
   -- have h : a.toNat < 2 ^ bw := a.toFin.isLt
   -- exact Nat.le_pred_of_lt h
 lemma neg_add_to_sub {α : Type*} [AddCommGroup α] (a b : α) :
@@ -43,9 +44,6 @@ lemma  neg_param (x y z : ZMod p) :
   x + (-y -z) = (x - y) -z := by
   ring_nf
 
-lemma if_to_bounds {b: Prop} {x: ZMod f} [Decidable b]: (if b then 1 else 0) =  x <->
-(if b then 1 else 0) =  x /\  ZMod.val x <= 1 := by
-sorry
 
 lemma duplicate {b a : ZMod ff} : b = a <->
   b = a /\ b = a := by
@@ -60,11 +58,15 @@ lemma sub_add_right_recursive {α : Type*} [AddCommGroup α]
 
 lemma ZMod.toNatLT {n} {a : ZMod n}
   (h: n> 0) : a.val <= n := by
-  sorry
+  haveI : NeZero n := ⟨Nat.ne_of_gt h⟩
+  -- a.val < n, hence a.val < n+1, hence a.val ≤ n
+  have hlt : a.val < n := ZMod.val_lt a
+  have hlt' : a.val < n.succ := lt_trans hlt (Nat.lt_succ_self n)
+  exact Nat.le_of_lt_succ hlt'
 
 lemma ZMod.toNatGT {n} {a : ZMod n}
   (h: n> 0) : a.val >= 0 := by
-  sorry
+  apply (Nat.zero_le a.val)
 
 lemma mod_le_pred {m k : ℕ} (hm : m > 0) :
     k % m ≤ m - 1 := by

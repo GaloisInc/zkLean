@@ -98,40 +98,41 @@ lemma sub_add_right_recursive {α : Type*} [AddCommGroup α]
 
 lemma BitVec.ofNat_sub  {bw x y : ℕ}  (h : y ≥ x) (h1: y < 2 ^ bw)   :
   BitVec.ofNat bw (y - x) = (BitVec.ofNat bw y) - (BitVec.ofNat bw x)
-  := by sorry
-    -- unfold BitVec.ofNat
-    -- rw [Fin.ofNat, Fin.ofNat,  Fin.ofNat]
-    -- apply congrArg
-    -- simp_all
-    -- apply Fin.eq_of_val_eq
-    -- simp_all
-    -- --nth_rewrite 3 [Nat.mod_eq_of_lt]
-    -- rw [<- Nat.mod_sub_of_le]
+  := by
+    unfold BitVec.ofNat
+    rw [Fin.ofNat, Fin.ofNat,  Fin.ofNat]
+    apply congrArg
+    simp_all
+    apply Fin.eq_of_val_eq
+    simp_all
+    --nth_rewrite 3 [Nat.mod_eq_of_lt]
+    rw [<- Nat.mod_sub_of_le]
 
-    -- --rw [Nat.mod_sub_of_le]
-    -- rw [← Nat.add_mod_right]
-    -- have pow_pos := Nat.two_pow_pos bw
-    -- have h : x % 2 ^ bw ≤ (y + 2 ^ bw) % 2 ^ bw := by
-    --       rw [Nat.add_mod_right ]
-    --       rw [Nat.mod_eq_of_lt]
-    --       rw [Nat.mod_eq_of_lt]
-    --       apply h
-    --       apply h2
-    --       apply h1
-    -- conv =>
-    --   enter [2]
-    --   simp
-    --   rw [Nat.add_comm (2 ^ bw - x % 2^ bw) y]
-    --   rw [← Nat.add_sub_assoc (Nat.le_of_lt (Nat.mod_lt x pow_pos))]
-    --   rw [<- Nat.mod_sub_of_le h]
-    --   rw [Nat.add_mod_right ]
-    -- simp
-    -- nth_rewrite 3 [Nat.mod_eq_of_lt]
-    -- simp
-    -- apply h1
-    -- rw [Nat.mod_eq_of_lt]
-    -- apply h
-    -- apply h2
+    --rw [Nat.mod_sub_of_le]
+    rw [← Nat.add_mod_right]
+    have pow_pos := Nat.two_pow_pos bw
+    have hx : x % 2 ^ bw ≤ (y + 2 ^ bw) % 2 ^ bw := by
+          rw [Nat.add_mod_right ]
+          rw [Nat.mod_eq_of_lt]
+          rw [Nat.mod_eq_of_lt]
+          apply h
+          apply h1
+          apply lt_of_le_of_lt h h1
+    conv =>
+      enter [2]
+      simp
+      rw [Nat.add_comm (2 ^ bw - x % 2^ bw) y]
+      rw [← Nat.add_sub_assoc (Nat.le_of_lt (Nat.mod_lt x pow_pos))]
+      rw [<- Nat.mod_sub_of_le hx]
+      rw [Nat.add_mod_right ]
+    simp
+    nth_rewrite 3 [Nat.mod_eq_of_lt]
+    simp
+    apply lt_of_le_of_lt h h1
+    rw [Nat.mod_eq_of_lt]
+    apply h
+    apply h1
+
 
 
 
