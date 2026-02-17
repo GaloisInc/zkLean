@@ -84,41 +84,6 @@ def rv_circ [ZKField f]: ZKBuilder f (List (RISCVState f))  := do
 
 
 
--- structure RISCVState (backend: Type) where
---   pc: ZKRepr backend UInt32
---   registers: Vector (ZKRepr backend UInt32) 32
-
--- structure RISCVState (backend: Type) [c: ZKBackend backend] where
---   pc: ZKRepr backend
---   registers: Vector (ZKRepr backend) 32
-
--- inductive RISCVState backend [c: ZKBackend backend] where
--- -- | MkRISCVState : ZKRepr -> Vector ZKRepr 1 -> RISCVState backend
--- | MkRISCVState : ZKRepr -> List ZKRepr -> RISCVState backend
---
--- def test : RISCVState Jolt := RISCVState.MkRISCVState 1 [1]
-
--- structure RISCVState (backend : Type) where
---   pc: ZKRepr backend Unit
---   -- registers: List (zkrepr UInt32)
-
--- #check RISCVState.mk 32
-
--- structure [ZKRepr zkrepr] RISCVState (zkrepr : Type) where
---   pc: repr zkrepr UInt32
---   -- registers: List (zkrepr UInt32)
-
--- def example2 {zkrepr:Type} [ZKRepr1 zkrepr Unit Unit] : ZKBuilder (RISCVState (ZKRepr1 zkrepr Unit)) := do
--- def example2 {zkrepr:Type} : ZKBuilder (RISCVState zkrepr) := do
---   let new_st <- witness
---
---   pure new_st
-
-
--- #eval example1
-
--- #check -5
--- #check (Int.natAbs) -5
 
 
 
@@ -175,11 +140,6 @@ def constrainEq3 [ZKField f] (a b c : ZKExpr f) : ZKBuilder f PUnit := do
   constrainEq2 a b
   constrainEq2 b c
 
-def circuit2 [ZKField f] : ZKBuilder f PUnit := do
-  let a <- Witnessable.witness
-  let b <- Witnessable.witness
-  let c <- Witnessable.witness
-  constrainEq3 a b c
 
 instance : Fact (Nat.Prime 7) := by decide
 instance : ZKField (ZMod 7) where
@@ -260,6 +220,3 @@ theorem constrainEq3.soundness [ZKField f] (a b c : ZKExpr f) :
   mpure Eq2
   aesop
 
-def main : IO Unit := do
-  IO.println "Currently, main does nothing."
-  return ()
