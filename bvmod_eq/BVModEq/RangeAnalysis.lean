@@ -7,7 +7,7 @@ import Mathlib.Control.Monad.Cont
 import Mathlib.Data.Nat.Basic
 import Mathlib.Tactic
 import Mathlib.Tactic.Eval
-import BVModEq.lemmas
+import BVModEq.Lemmas
 
 open Lean Meta Elab Tactic
 
