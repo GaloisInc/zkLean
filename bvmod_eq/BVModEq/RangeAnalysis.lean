@@ -81,7 +81,7 @@ def mkAddNat (es : List Expr) : Expr :=
   | [e]     => e
   | e :: es => mkApp2 (mkConst ``Nat.add) e (mkAddNat es)
 
-
+set_option linter.unusedVariables false
 
 
 

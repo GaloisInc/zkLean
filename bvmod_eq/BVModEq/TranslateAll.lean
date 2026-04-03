@@ -24,6 +24,7 @@ namespace BVModEq
 set_option maxRecDepth 1048576
 set_option maxHeartbeats  20000000000000000000
 set_option exponentiation.threshold 900
+set_option linter.unusedVariables false
 
 syntax (name := translateHypothesis) "translate_hypothesis" ppSpace ident ("[" ident,* "]")?  ("[" ident,* "]")? (ppSpace term)? : tactic
 
@@ -31,8 +32,52 @@ def varToHyp : Std.HashMap FVarId Expr := {}
 
 open Lean Meta
 
+structure PhaseStats where
+  translationMs : Nat := 0
+  rangeMs       : Nat := 0
+  reconMs       : Nat := 0
+deriving Inhabited
+
+def timeTacticPhase {α}
+    (statsRef : IO.Ref PhaseStats)
+    (kind : String)
+    (x : TacticM α) : TacticM α := do
+  let start ← IO.monoMsNow
+  try
+    let result ← x
+    let stop ← IO.monoMsNow
+    let delta := stop - start
+    statsRef.modify fun s =>
+      match kind with
+      | "translation" => { s with translationMs := s.translationMs + delta }
+      | "range"       => { s with rangeMs       := s.rangeMs + delta }
+      | "bitblast"    => { s with reconMs       := s.reconMs + delta }
+      | _             => s
+    pure result
+  catch e =>
+    let stop ← IO.monoMsNow
+    let delta := stop - start
+    statsRef.modify fun s =>
+      match kind with
+      | "translation" => { s with translationMs := s.translationMs + delta }
+      | "range"       => { s with rangeMs       := s.rangeMs + delta }
+      | "bitblast"    => { s with reconMs       := s.reconMs + delta }
+      | _             => s
+    throw e
 
 
+def printPhaseStats (statsRef : IO.Ref PhaseStats) : TacticM Unit := do
+  let s ← statsRef.get
+  let total := s.translationMs + s.rangeMs + s.reconMs
+  if total = 0 then
+    logInfo m!"No phase timing data collected."
+  else
+    let pctStr (n : Nat) : String :=
+      toString ((Float.ofNat n) * 100.0 / (Float.ofNat total))
+    logInfo m!"Translation: {s.translationMs} ms ({pctStr s.translationMs}%)"
+    logInfo m!"Range analysis: {s.rangeMs} ms ({pctStr s.rangeMs}%)"
+    logInfo m!"Proof bitblast: {s.reconMs} ms ({pctStr s.reconMs}%)"
+    logInfo m!"Total: {total} ms"
 /-- Recursively compute a bit-width for a Nat expression.
 
     Strategy:
@@ -403,6 +448,7 @@ syntax (name := dbg_mod_syn) "dbg_mod" num "[" ident,* "]" : tactic
 
 elab_rules : tactic
   | `(tactic| dbg_mod $k:num [$ids:ident,*]) => do
+  let statsRef ← IO.mkRef ({ } : PhaseStats)
       -- k : Syntax, ids : Array Syntax
   withMainContext do
     let k : Nat := k.getNat
@@ -436,7 +482,8 @@ elab_rules : tactic
           withMainContext do
             let g <- getMainGoal
             --logInfo m!"{g}"
-            evalTactic (← `(tactic| focus  try_apply_lemma_hyps [$[$ids],*] ))
+            timeTacticPhase statsRef "range" do
+              evalTactic (← `(tactic| focus  try_apply_lemma_hyps [$[$ids],*] ))
           evalTactic (← `(tactic| try simp ) )
           let g ← getMainGoal
           let name := Name.mkSimple s!"proof"
@@ -461,6 +508,7 @@ elab_rules : tactic
             -- evalTactic (← `(tactic| apply $hcTerm))
         else
           throwError "Why is modulus bigger? {k} and {n}"
+  printPhaseStats statsRef
 
 
 -- /-- Recursively gather all `(width, x)` inside an expression -/
@@ -721,7 +769,8 @@ elab_rules : tactic
     goal ← getMainGoal
 
 
-  logInfo "=== autoCastBits: finished ==="
+
+
 
 
 
@@ -888,6 +937,7 @@ partial def countOrs (e : Expr) : Nat :=
 @[tactic translateHypothesis]
 elab_rules : tactic
 | `(tactic| translate_hypothesis $h:ident [$ids,*] [$non_v,*] $[$b:term]? ) => withMainContext do
+  let statsRef ← IO.mkRef ({ } : PhaseStats)
   /- Build simpArg array (empty if none provided) -/
   let mut sargs :
     Array (TSyntax [`Lean.Parser.Tactic.simpStar,
@@ -998,7 +1048,8 @@ elab_rules : tactic
             -- let init := cur_g.dropLast
             -- focus only the last goal
             withMainContext  do
-              evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$all],*]))
+              timeTacticPhase statsRef "range" do
+                 evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$all],*]))
             let after ← getGoals
             --logInfo m!"CUR GOALS: {after}"
             if after.isEmpty then
@@ -1077,7 +1128,8 @@ elab_rules : tactic
             setGoals [g_last]
             withMainContext  do
              -- logInfo m!"{g_last}"
-              evalTactic (← `(tactic| try focus try_apply_lemma_hyps [$[$all],*]))
+              timeTacticPhase statsRef "range" do
+                evalTactic (← `(tactic| try focus try_apply_lemma_hyps [$[$all],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ([g_one] ++ rest_rev)
@@ -1096,7 +1148,7 @@ elab_rules : tactic
           catch _ =>
             subLoop := false
     evalTactic (← `(tactic|  try simp (config := { zeta := false, beta := false }) at $(mkIdent h.getId):ident) )
-
+  printPhaseStats statsRef
 
 
 syntax (name := translateGoal)
@@ -1297,6 +1349,7 @@ partial def loopUntilDone
 @[tactic translateGoal]
 elab_rules : tactic
 | `(tactic| translate_goal [$ids,*] $[$b:term]? ) => withMainContext do
+  let statsRef ← IO.mkRef ({ } : PhaseStats)
   /- Build simpArg array (empty if none provided) -/
   let mut sargs :
     Array (TSyntax [`Lean.Parser.Tactic.simpStar,
@@ -1407,7 +1460,8 @@ elab_rules : tactic
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
             withMainContext  do
-                evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
+                timeTacticPhase statsRef "range" do
+                  evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ([g_one] ++ rest_rev)
@@ -1510,7 +1564,8 @@ elab_rules : tactic
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
             withMainContext  do
-                 evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
+                 timeTacticPhase statsRef "range" do
+                    evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ( [g_one ] ++ rest_rev )
@@ -1533,6 +1588,7 @@ elab_rules : tactic
               subLoop := false
   evalTactic (← `(tactic| try simp  ))
   let x <-loopUntilDone flag ids (count+1)
+  printPhaseStats statsRef
 
 
 
@@ -1795,185 +1851,210 @@ syntax (name := translateAll) "translate_all" ppSpace
 @[tactic translateAll]
 elab_rules : tactic
 | `(tactic| translate_all $[[ $extraSimp,* ]]? $[$b:term]? ) => withMainContext do
+  let statsRef ← IO.mkRef ({ } : PhaseStats)
+  timeTacticPhase statsRef "translation" do
   -- collect optional extra simp args (reuse your pipeline args if you like)
-  let mut sargs :
-    Array (TSyntax [`Lean.Parser.Tactic.simpStar,
-                    `Lean.Parser.Tactic.simpErase,
-                    `Lean.Parser.Tactic.simpLemma]) := #[]
-  if let some idList := extraSimp then
-    for i in idList.getElems do
-      let sa ← `(simpArg| $i:term)
-      let ua : TSyntax [`Lean.Parser.Tactic.simpStar,
-                        `Lean.Parser.Tactic.simpErase,
-                        `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
-      sargs := sargs.push ua
-  let flag ←
-    match b with
-    | some bterm =>
-        pure true
-    | none => pure false
-  evalTactic (← `(tactic| try simp [-one_mul, -mul_one]))
-  let gs ← getGoals
-  if gs.isEmpty then
-    logInfo "✅ No goals left!"
-    return
+    let mut sargs :
+      Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+                      `Lean.Parser.Tactic.simpErase,
+                      `Lean.Parser.Tactic.simpLemma]) := #[]
+    if let some idList := extraSimp then
+      for i in idList.getElems do
+        let sa ← `(simpArg| $i:term)
+        let ua : TSyntax [`Lean.Parser.Tactic.simpStar,
+                          `Lean.Parser.Tactic.simpErase,
+                          `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
+        sargs := sargs.push ua
+    let flag ←
+      match b with
+      | some bterm =>
+          pure true
+      | none => pure false
+    evalTactic (← `(tactic| try simp [-one_mul, -mul_one]))
+    let gs ← getGoals
+    if gs.isEmpty then
+      logInfo "✅ No goals left!"
+      return
 
-  let name := Name.mkSimple s!"h"
-  let g ← getMainGoal
-  --let collected ←
- -- try
-  let hyps : List Name ← introAll
-  let mut ids : Array (TSyntax `ident) := #[]
-    ---et (fvarId, newGoal) ← g.intro `h
-  let g ← getMainGoal
+    let name := Name.mkSimple s!"h"
+    let g ← getMainGoal
+    --let collected ←
+  -- try
+    let hyps : List Name ← introAll
+    let mut ids : Array (TSyntax `ident) := #[]
+      ---et (fvarId, newGoal) ← g.intro `h
+    let g ← getMainGoal
 
-  for x in hyps do
-      let id : TSyntax `ident ← g.withContext do
-        let lctx ← getLCtx
-        let some decl := lctx.findFromUserName? x
-          | throwError m!"no hyp `{x}`"
-        pure (mkIdent decl.userName)
+    for x in hyps do
+        let id : TSyntax `ident ← g.withContext do
+          let lctx ← getLCtx
+          let some decl := lctx.findFromUserName? x
+            | throwError m!"no hyp `{x}`"
+          pure (mkIdent decl.userName)
 
-      ids := ids.push id
+        ids := ids.push id
 
-  if ids.size == 1 then
-    try
-      ids <- flattenAnds ids[0]!
-    catch _ => pure ()
-
-  let varToHypRef ← IO.mkRef ({} : Std.HashMap FVarId (TSyntax `ident))
-  let ( collected, changed) := (← smartTranslateMany ids sargs varToHypRef flag)
-
-  --colected := collected ++ changed
-  let mut after ← getGoals
-  if after.isEmpty then
-    return
-  let flagStx ←
-  if flag then
-    `(true)
-  else
-    `(false)
-  evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx ))
-
-
-  evalTactic (← `(tactic| try simp ))
-  let flag ←
-    match b with
-    | some bterm =>
-        pure true
-    | none => pure false
-  after ← getGoals
-  if after.isEmpty then
-    return
-  let tgt ← (← getMainGoal).getType
-  let tgt <- whnf tgt
-  let (fn, args) := tgt.getAppFnArgs
-  let mut bitblast :=
-    match fn with
-    | ``Eq  => true
-    | ``Or => true
-    | ``And => true
-    | ``Iff => true
-    | _ => false
-
-  if bitblast then
+    if ids.size == 1 then
       try
-        evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-      catch _ =>
+        ids <- flattenAnds ids[0]!
+      catch _ => pure ()
 
-        let all := collected ++ changed
-        evalTactic (← `(tactic| autoCastBits [$[$all],*]))
-        let mut rw := true
-        while (rw) do
-          try
-              evalTactic (← `(tactic| intro h))
-              evalTactic (← `(tactic| try rw [h]))
-              for hyp in ids ++ changed  do
-                evalTactic (← `(tactic| try rw [h] at $(mkIdent hyp.getId):ident))
-              evalTactic (← `(tactic| clear h))
-              -- evalTactic (← `(tactic| try simp only [BitVec.setWidth] at $(mkIdent hyp.getId):ident))
-          catch _ =>
-            rw := false
+    let varToHypRef ← IO.mkRef ({} : Std.HashMap FVarId (TSyntax `ident))
+    let ( collected, changed) := (← smartTranslateMany ids sargs varToHypRef flag)
+
+    --colected := collected ++ changed
+    let mut after ← getGoals
+    if after.isEmpty then
+      return
+    let flagStx ←
+    if flag then
+      `(true)
+    else
+      `(false)
+    evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx ))
+
+
+    evalTactic (← `(tactic| try simp ))
+    let flag ←
+      match b with
+      | some bterm =>
+          pure true
+      | none => pure false
+    after ← getGoals
+    if after.isEmpty then
+      return
+    let tgt ← (← getMainGoal).getType
+    let tgt <- whnf tgt
+    let (fn, args) := tgt.getAppFnArgs
+    let mut bitblast :=
+      match fn with
+      | ``Eq  => true
+      | ``Or => true
+      | ``And => true
+      | ``Iff => true
+      | _ => false
+
+    if bitblast then
         try
-          evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-      -- else
-      --   logInfo m!"NO BV DECIDE {fn}"
+          timeTacticPhase statsRef "bitblast" do
+            evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
         catch _ =>
-          pure ()
 
+          let all := collected ++ changed
+          evalTactic (← `(tactic| autoCastBits [$[$all],*]))
+          let mut rw := true
+          while (rw) do
+            try
+                evalTactic (← `(tactic| intro h))
+                evalTactic (← `(tactic| try rw [h]))
+                for hyp in ids ++ changed  do
+                  evalTactic (← `(tactic| try rw [h] at $(mkIdent hyp.getId):ident))
+                evalTactic (← `(tactic| clear h))
+                -- evalTactic (← `(tactic| try simp only [BitVec.setWidth] at $(mkIdent hyp.getId):ident))
+            catch _ =>
+              rw := false
           try
-          --THIS IS NEEDED FOR JOLT BUT NOT CIRC WE SHOULD FIND A WAY TO ABSTRACT THIS
-            let mut index :=0
-            let fv1T : TSyntax `term := (← termFor `fv1)
-            let fv2T : TSyntax `term := (← termFor `fv2)
-            while index < collected.size/2 do
+            timeTacticPhase statsRef "bitblast" do
+              evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+        -- else
+        --   logInfo m!"NO BV DECIDE {fn}"
+          catch _ =>
+            pure ()
 
-              -- names for the bound and its equality
-              let idName  := Name.mkSimple s!"b0_{index}"
+            try
+            --THIS IS NEEDED FOR JOLT BUT NOT CIRC WE SHOULD FIND A WAY TO ABSTRACT THIS
+              let mut index :=0
+              let fv1T : TSyntax `term := (← termFor `fv1)
+              let fv2T : TSyntax `term := (← termFor `fv2)
+              while index < collected.size/2 do
 
-              -- identifiers/syntax nodes
-              let idSyn   : TSyntax `ident := mkIdent idName
-              let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+                -- names for the bound and its equality
+                let idName  := Name.mkSimple s!"b0_{index}"
 
-              -- safest access: .get! (parses reliably inside quotations)
-              evalTactic (← `(tactic|
-                set $idSyn := $fv1T[$idxSyn]
-              ))
-              index := index + 1
-            index := 0
-            while index < collected.size/2 do
-              -- names for the bound and its equality
-              let idName  := Name.mkSimple s!"b1_{index}"
+                -- identifiers/syntax nodes
+                let idSyn   : TSyntax `ident := mkIdent idName
+                let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
 
-              -- identifiers/syntax nodes
-              let idSyn   : TSyntax `ident := mkIdent idName
-              let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+                -- safest access: .get! (parses reliably inside quotations)
+                evalTactic (← `(tactic|
+                  set $idSyn := $fv1T[$idxSyn]
+                ))
+                index := index + 1
+              index := 0
+              while index < collected.size/2 do
+                -- names for the bound and its equality
+                let idName  := Name.mkSimple s!"b1_{index}"
 
-              -- safest access: .get! (parses reliably inside quotations)
-              evalTactic (← `(tactic|
-                set $idSyn := $fv2T[$idxSyn]
-              ))
-              index := index + 1
-            evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-        catch _ =>
-           -- pure ()
-            evalTactic (← `(tactic| split_ands))
+                -- identifiers/syntax nodes
+                let idSyn   : TSyntax `ident := mkIdent idName
+                let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+
+                -- safest access: .get! (parses reliably inside quotations)
+                evalTactic (← `(tactic|
+                  set $idSyn := $fv2T[$idxSyn]
+                ))
+                index := index + 1
+              timeTacticPhase statsRef "bitblast" do
+                evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+          catch _ =>
+            -- pure ()
+              evalTactic (← `(tactic| split_ands))
 
 
-    --logInfo m! "Collected {collected}"
-  withMainContext do
-    evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
-  after ← getGoals
-
-  if !after.isEmpty then
-    while (!after.isEmpty) do
-  -- record the current state
-      let before ← getGoals
-
-  -- -- run your tactics
-      withMainContext do
-        evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx))
-      let tgt ← (← getMainGoal).getType
-      let tgt <- whnf tgt
-      let (fn, args) := tgt.getAppFnArgs
-      bitblast :=
-          match fn with
-          | ``Eq  => true
-          | ``Or => true
-          | ``And => true
-          | ``Iff => true
-          | _ => false
-      if bitblast then
-          let g <- getMainGoal
-          --logInfo m!"{g}"
-          withMainContext do
-            evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-
-  --     -- read the new state
-      withMainContext do
+      --logInfo m! "Collected {collected}"
+    withMainContext do
+      timeTacticPhase statsRef "range" do
         evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
+    after ← getGoals
 
-      after ← getGoals
-      -- if no change → stop
-      if before == after then
-         return
+    if !after.isEmpty then
+      while (!after.isEmpty) do
+    -- record the current state
+        let before ← getGoals
+
+    -- -- run your tactics
+        withMainContext do
+          evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx))
+        let tgt ← (← getMainGoal).getType
+        let tgt <- whnf tgt
+        let (fn, args) := tgt.getAppFnArgs
+        bitblast :=
+            match fn with
+            | ``Eq  => true
+            | ``Or => true
+            | ``And => true
+            | ``Iff => true
+            | _ => false
+        if bitblast then
+            let g <- getMainGoal
+            --logInfo m!"{g}"
+            withMainContext do
+              timeTacticPhase statsRef "bitblast" do
+                evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+
+    --     -- read the new state
+        withMainContext do
+          timeTacticPhase statsRef "range" do
+            evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
+
+        after ← getGoals
+        -- if no change → stop
+        if before == after then
+          return
+  printPhaseStats statsRef
+
+-- set_option maxRecDepth 1048576
+-- set_option maxHeartbeats  20000000000000000000
+-- set_option exponentiation.threshold 900
+-- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- instance : Fact (Nat.Prime ffff0) := by sorry
+-- instance : Fact (NeZero ffff0) := by sorry
+-- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
+
+-- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
+-- variable (fresh_pf1_sum_bit1 : FF0)
+-- variable (a : BitVec 2)
+-- variable (fresh_pf0_sum_bit0 : FF0)
+-- lemma correct :
+-- ((((((((fresh_pf0_sum_bit0) * (fresh_pf0_sum_bit0))) = (fresh_pf0_sum_bit0))) ∧ (((((fresh_pf1_sum_bit1) * (fresh_pf1_sum_bit1))) = (fresh_pf1_sum_bit1))) ∧ (((((fresh_pf0_sum_bit0) + (((fresh_pf1_sum_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  a)))) → (((((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf0_sum_bit0))) ∧ (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf1_sum_bit1)))))))
+--  := by translate_all
