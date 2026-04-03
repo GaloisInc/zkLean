@@ -12,6 +12,8 @@ abbrev f := FF0
 
 
 set_option maxHeartbeats  20000000000000000000
+set_option profiler true
+set_option profiler.threshold 50
 
 
 def LSB_16 [Field f] : Subtable f 16 :=

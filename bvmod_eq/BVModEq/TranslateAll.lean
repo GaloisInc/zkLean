@@ -25,6 +25,7 @@ set_option maxRecDepth 1048576
 set_option maxHeartbeats  20000000000000000000
 set_option exponentiation.threshold 900
 set_option linter.unusedVariables false
+--set_option trace.profiler true
 
 syntax (name := translateHypothesis) "translate_hypothesis" ppSpace ident ("[" ident,* "]")?  ("[" ident,* "]")? (ppSpace term)? : tactic
 

@@ -13,6 +13,8 @@ abbrev f := FF0
 
 
 set_option maxHeartbeats  20000000000000000000
+set_option profiler true
+set_option profiler.threshold 50
 
 def OR_16 [Field f] : Subtable f 16 :=
   subtableFromMLE (fun x => 0 + 1*(x[7] + x[15] - x[7]*x[15]) + 2*(x[6] + x[14] - x[6]*x[14]) + 4*(x[5] + x[13] - x[5]*x[13]) + 8*(x[4] + x[12] - x[4]*x[12]) + 16*(x[3] + x[11] - x[3]*x[11]) + 32*(x[2] + x[10] - x[2]*x[10]) + 64*(x[1] + x[9] - x[1]*x[9]) + 128*(x[0] + x[8] - x[0]*x[8]))

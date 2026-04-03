@@ -13,6 +13,8 @@ abbrev f := FF0
 
 
 set_option maxHeartbeats  20000000000000000000
+set_option profiler true
+set_option profiler.threshold 50
 
 def LEFT_IS_ZERO_16 [Field f] : Subtable f 16 :=
   subtableFromMLE (fun x => 1*(1 - x[0])*(1 - x[1])*(1 - x[2])*(1 - x[3])*(1 - x[4])*(1 - x[5])*(1 - x[6])*(1 - x[7]))

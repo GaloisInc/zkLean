@@ -10,6 +10,8 @@ abbrev FF0 := ZMod 5243587517512619047944774050818596583769055250052763782260365
 abbrev f := FF0
 
 set_option maxHeartbeats  20000000000000000000
+set_option profiler true
+set_option profiler.threshold 50
 
 def SIGN_EXTEND_16_16 [Field f] : Subtable f 16 :=
   subtableFromMLE (fun x => x[0]*65535)

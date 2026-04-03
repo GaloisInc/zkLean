@@ -2,6 +2,9 @@ import BVModEq.TranslateAll
 set_option maxRecDepth 1048576
 set_option maxHeartbeats  20000000000000000000
 set_option exponentiation.threshold 900
+set_option profiler true
+set_option profiler.threshold 50
+
 abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
 instance : Fact (Nat.Prime ffff0) := by sorry
 instance : Fact (NeZero ffff0) := by sorry
