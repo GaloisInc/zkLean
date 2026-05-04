@@ -1,20 +1,20 @@
 # This Lakefile is only a convenience one to be able to build any of the sub-projects from this
 # directory.  This doesn't build anything, but it lets you run e.g.
 #
-# lake build ./zk_lean/ZKLean.lean
+# lake build ./zkLean/zkLean.lean
 #
-# to build ZKLean specifically.
+# to build zkLean specifically.
 
-name = "ZKLeanEcosystem"
+name = "zkLeanEcosystem"
 
 [[require]]
 name = "BVModEq"
 path = "./bvmod_eq"
 
 [[require]]
-name = "ZKLean"
-path = "./zk_lean"
+name = "zkLean"
+path = "./zkLean"
 
 [[require]]
-name = "ZKLeanExamples"
-path = "./zk_lean_examples"
+name = "zkLeanExamples"
+path = "./examples"

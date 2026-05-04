@@ -93,22 +93,26 @@ lemma extract_bv_rel {b : ℕ} {x : ZMod ff} [h0 : NeZero b] :
   intro h h2
   constructor
   · cases hx : x.val with
-    | zero => decide
+    | zero =>
+        decide
     | succ n =>
         cases n with
-        | zero => decide
+        | zero =>
+            decide
         | succ m =>
             exfalso
             rw [hx] at h2
-            unfold BitVec.ofNat at h2
-            unfold Fin.ofNat at h2
-            have h' := congrArg (fun x => x.toFin.val) h2
-            simp at h'
+
+            have h' := congrArg BitVec.toNat h2
+            simp [BitVec.toNat_ofNat] at h'
+
             have mod_eq : (m + 2) % (2 ^ b) = m + 2 := by
               rw [← hx]
               apply Nat.mod_eq_of_lt
               exact h
+
             rw [← h'] at mod_eq
+
             cases hb : bf with
             | true =>
                 rw [hb] at mod_eq
@@ -121,8 +125,8 @@ lemma extract_bv_rel {b : ℕ} {x : ZMod ff} [h0 : NeZero b] :
             | false =>
                 rw [hb] at mod_eq
                 simp at mod_eq
+
   · intro w hw
-    unfold BitVec.ofNat
     cases bf
     · simp
       simp at h2
@@ -134,14 +138,15 @@ lemma extract_bv_rel {b : ℕ} {x : ZMod ff} [h0 : NeZero b] :
         · exact hmod
         · exact h
       simp [hx0]
+
     · simp
       have hx1 : x.val = 1 := by
         have ht := congrArg BitVec.toNat h2
         have hmod : x.val % 2 ^ b = 1 := by
-          simp at ht
+          simp [BitVec.toNat_ofNat] at ht
           rw [Nat.mod_eq_of_lt] at ht
           · exact ht.symm
-          · aesop
+          · exact Nat.one_lt_two_pow h0.out
         rw [Nat.mod_eq_of_lt] at hmod
         · exact hmod
         · exact h

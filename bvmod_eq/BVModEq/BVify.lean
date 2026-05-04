@@ -28,12 +28,8 @@ open Lean.Parser.Tactic
 /-- Multiplication distributes through `BitVec.ofNat`. -/
 lemma BitVec.ofNat_mul {w a b : ℕ} :
     BitVec.ofNat w (a * b) = BitVec.ofNat w a * BitVec.ofNat w b := by
-  rw [BitVec.ofNat, BitVec.ofNat, BitVec.ofNat]
-  rw [Fin.ofNat, Fin.ofNat, Fin.ofNat]
-  apply congrArg
-  simp_all
-  apply Fin.eq_of_val_eq
-  simp_all
+  apply BitVec.eq_of_toNat_eq
+  simp [BitVec.toNat_ofNat, Nat.mul_mod]
 
 /-- `if` over Bool commutes with `BitVec.ofNat`. -/
 lemma BitVec.ofNat_if_then_else {bw x y : ℕ} {b : Bool} :
@@ -52,12 +48,8 @@ lemma BitVec.ofNat_if_then_prop_else {bw x y : ℕ} {b : Prop} [Decidable b] :
 /-- Subtraction distributes through `BitVec.ofNat` under bounds. -/
 lemma BitVec.ofNat_sub {bw x y : ℕ} (h : y ≥ x) (h1 : y < 2 ^ bw) :
     BitVec.ofNat bw (y - x) = BitVec.ofNat bw y - BitVec.ofNat bw x := by
-  unfold BitVec.ofNat
-  rw [Fin.ofNat, Fin.ofNat, Fin.ofNat]
-  apply congrArg
-  simp_all
-  apply Fin.eq_of_val_eq
-  simp_all
+  apply BitVec.eq_of_toNat_eq
+  simp [BitVec.toNat_ofNat]
   rw [← Nat.mod_sub_of_le]
 
   have pow_pos := Nat.two_pow_pos bw
@@ -76,6 +68,7 @@ lemma BitVec.ofNat_sub {bw x y : ℕ} (h : y ≥ x) (h1 : y < 2 ^ bw) :
     rw [← Nat.add_sub_assoc (Nat.le_of_lt (Nat.mod_lt x pow_pos))]
     rw [← Nat.mod_sub_of_le hx]
     rw [Nat.add_mod_right]
+
 
   nth_rewrite 3 [Nat.mod_eq_of_lt]
   simp

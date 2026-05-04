@@ -21,7 +21,7 @@ import Mathlib.Data.Nat.Prime.Defs
 import Mathlib.Data.ZMod.Defs
 import Mathlib.Tactic.Linarith
 import Std.Data.HashMap.Basic
-import ZKLean.Formalism
+
 
 import BVModEq.RangeAnalysis
 import BVModEq.Mappings
@@ -157,12 +157,12 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
     | ``OfNat.ofNat =>
        return (<- CalcBitWidth args[args.size-2]! hs)
     | _ =>
-      logInfo m!"unsupported application head {name} with {args} and {args.size}"
+      --logInfo m!"unsupported application head {name} with {args} and {args.size}"
       if  args.size ≥ 2 then
           return Nat.max (<- CalcBitWidth args[args.size-1]! hs)  (<- CalcBitWidth args[args.size-2]! hs)
       return 1
   | _ =>
-      logInfo m!"unsupported op {fn} with {args}"
+     -- logInfo m!"unsupported op {fn} with {args}"
       if  args.size ≥ 2 then
           return Nat.max (<- CalcBitWidth args[args.size-1]! hs)  (<- CalcBitWidth args[args.size-2]! hs)
       return 1

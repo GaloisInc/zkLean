@@ -128,15 +128,11 @@ lemma BitVec_ofNat_eq_iff (n : ℕ) {x y : ℕ}
   · intro h
     rw [h]
   · intro h
-    unfold BitVec.ofNat at h
-    unfold Fin.ofNat at h
-    have h' := congrArg (fun x => x.toFin.val) h
-    simp at h
-    apply Nat.mod_eq_of_modEq at h'
-    have hxy : x % 2 ^ n = y := h' hy
-    rw [Nat.mod_eq_of_lt] at hxy
-    exact hxy
-    exact hx
+    have h' := congrArg BitVec.toNat h
+    simp [BitVec.toNat_ofNat] at h'
+    rw [Nat.mod_eq_of_lt hx] at h'
+    rw [Nat.mod_eq_of_lt hy] at h'
+    exact h'
 
 /-- Move a natural modulo operation through `BitVec.ofNat` under range assumptions. -/
 lemma BitVec.ofNat_mod_move {f n w : Nat} [hfne : NeZero f] [NeZero w]
