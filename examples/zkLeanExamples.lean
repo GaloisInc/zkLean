@@ -1,4 +1,4 @@
-import zkLeanExamples.AND
+import zkLeanExamples.And
 import zkLeanExamples.AssertLTE -- This one is slow, ~ 6 minutes
 import zkLeanExamples.XOR
 import zkLeanExamples.Sha3.Circuit
