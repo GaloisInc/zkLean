@@ -1,3 +1,16 @@
+/-
+Translation tactics for BVModEq.
+
+This file implements tactics that translate hypotheses and goals between
+`ZMod`, `Nat`, and `BitVec` forms. The translation pipeline normalizes
+arithmetic, pushes `.val` and `BitVec.ofNat` through expressions, applies
+range analysis to discharge side conditions, and then rewrites into a form
+that can be handled by bitvector reasoning.
+
+This cleanup keeps the original tactic behavior intact while removing
+scratch/debug comments and timing instrumentation.
+-/
+
 import Lean.Elab.Term
 import Lean.Meta.Basic
 import Mathlib.Algebra.Field.Defs
@@ -11,7 +24,6 @@ import Std.Data.HashMap.Basic
 import ZKLean.Formalism
 
 import BVModEq.RangeAnalysis
---import BVModEq.BVify
 import BVModEq.Mappings
 
 open Lean Meta Elab Tactic
@@ -25,91 +37,35 @@ set_option maxRecDepth 1048576
 set_option maxHeartbeats  20000000000000000000
 set_option exponentiation.threshold 900
 set_option linter.unusedVariables false
---set_option trace.profiler true
 
+/-- Translate a named hypothesis into a bitvector-friendly form.
+
+The optional identifier lists are forwarded to simplification and range-analysis
+steps. The optional term is used as a flag for recursive translation of
+composite `BitVec.ofNat` subterms. -/
 syntax (name := translateHypothesis) "translate_hypothesis" ppSpace ident ("[" ident,* "]")?  ("[" ident,* "]")? (ppSpace term)? : tactic
 
-def varToHyp : Std.HashMap FVarId Expr := {}
-
-open Lean Meta
-
-structure PhaseStats where
-  translationMs : Nat := 0
-  rangeMs       : Nat := 0
-  reconMs       : Nat := 0
-deriving Inhabited
-
-def timeTacticPhase {α}
-    (statsRef : IO.Ref PhaseStats)
-    (kind : String)
-    (x : TacticM α) : TacticM α := do
-  let start ← IO.monoMsNow
-  try
-    let result ← x
-    let stop ← IO.monoMsNow
-    let delta := stop - start
-    statsRef.modify fun s =>
-      match kind with
-      | "translation" => { s with translationMs := s.translationMs + delta }
-      | "range"       => { s with rangeMs       := s.rangeMs + delta }
-      | "bitblast"    => { s with reconMs       := s.reconMs + delta }
-      | _             => s
-    pure result
-  catch e =>
-    let stop ← IO.monoMsNow
-    let delta := stop - start
-    statsRef.modify fun s =>
-      match kind with
-      | "translation" => { s with translationMs := s.translationMs + delta }
-      | "range"       => { s with rangeMs       := s.rangeMs + delta }
-      | "bitblast"    => { s with reconMs       := s.reconMs + delta }
-      | _             => s
-    throw e
-
-
-def printPhaseStats (statsRef : IO.Ref PhaseStats) : TacticM Unit := do
-  let s ← statsRef.get
-  let total := s.translationMs + s.rangeMs + s.reconMs
-  if total = 0 then
-    logInfo m!"No phase timing data collected."
-  else
-    let pctStr (n : Nat) : String :=
-      toString ((Float.ofNat n) * 100.0 / (Float.ofNat total))
-    logInfo m!"Translation: {s.translationMs} ms ({pctStr s.translationMs}%)"
-    logInfo m!"Range analysis: {s.rangeMs} ms ({pctStr s.rangeMs}%)"
-    logInfo m!"Proof bitblast: {s.reconMs} ms ({pctStr s.reconMs}%)"
-    logInfo m!"Total: {total} ms"
-/-- Recursively compute a bit-width for a Nat expression.
-
-    Strategy:
-    * literals: exact width from their value
-    * free vars: width = 1 (you can replace this with something smarter later)
-    * application: recurse on args to get widths, then:
-        - match on the head `fn` to handle known operators (HAdd, HSub, HMul, HMod, ZMod.val)
-        - otherwise, combine child widths conservatively
--/
-
+/-- Resolve a local name to term syntax when possible. -/
 private def termFor (nm : Name) : TacticM (TSyntax `term) := withMainContext do
   match (← getLCtx).findFromUserName? nm with
   | some d => pure ⟨(mkIdent d.userName).raw⟩
   | none   => pure ⟨(mkIdent nm).raw⟩
 
 
+/-- Conservatively estimate a natural bound used to choose a BitVec width. -/
 partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat := do
   let e ← withReducible <| whnf e
   let fn  := e.getAppFn
   let args := e.getAppArgs
+  /- Atomic expressions get widths from their type or literal value. -/
   if args.isEmpty then
     let ty ← inferType e >>= whnf
     match ty.getAppFnArgs with
     | (``BitVec , #[w]) =>
-         --return (<- CalcBitWidth w hs)
         match (← whnf w) with
           | (Expr.lit (Literal.natVal n)) =>
              return 2^n
-          | _ =>  logInfo m!"UGH"
-    --         logInfo m!"BitVec width not a numeral: {w}"
-    --         return 1
+          | _ =>  logInfo m!"BitVec width is not a numeral; falling back to recursive width analysis."
     | _ =>pure ()
   match e with
     | (Expr.lit (Literal.natVal n)) =>
@@ -125,21 +81,19 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
 
       for hName in hyps do
         let some decl := lctx.findFromUserName? hName
-          | throwError m!"❌ Could not find a hypothesis named `{hName}`"
+          | throwError m!"Could not find hypothesis `{hName}`"
         match decl.type.getAppFnArgs with
         | (``LE.le, #[_, _, lhs, rhs]) =>
           match (← whnf rhs) with
           | (Expr.lit (Literal.natVal n)) => do
 
               if  (<- collectTerms e).contains (<- collectTerms lhs).toList[0]!  then
-                 --logInfo m!"this is not the issue"
                  return n
               else
                 pure ()
 
           | _ =>  pure ()
         | _ =>  pure ()
-      --logInfo m! "WHY ARE WE HERE {e}"
       return ( <- CalcBitWidth args[0]! hs)
     |  ``Eq  =>
       return (Nat.max (<- CalcBitWidth args[args.size-1]! hs) (<- CalcBitWidth args[args.size-2]! hs))
@@ -180,14 +134,12 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
         if  args.size ≥ 2 then
           return (<- CalcBitWidth args[args.size-1]! hs)
         throwError "wrong # args BitVec.toNat"
-        --return 10
     | ``Or =>
        if  args.size ≥ 2 then
         return Nat.max (<- CalcBitWidth args[args.size-1]! hs)  (<- CalcBitWidth args[args.size-2]! hs)
        throwError "wrong # args or {args}"
     | ``And =>
        if  args.size ≥ 2 then
-        --logInfo m!"LHS {(<- CalcBitWidth args[args.size-2]! hs)}"
         return Nat.max (<- CalcBitWidth args[args.size-1]! hs)  (<- CalcBitWidth args[args.size-2]! hs)
        throwError "wrong # args and {args}"
     | ``GetElem.getElem =>
@@ -205,7 +157,7 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
     | ``OfNat.ofNat =>
        return (<- CalcBitWidth args[args.size-2]! hs)
     | _ =>
-      logInfo m!"unsupported ap {name} with {args} and {args.size}"
+      logInfo m!"unsupported application head {name} with {args} and {args.size}"
       if  args.size ≥ 2 then
           return Nat.max (<- CalcBitWidth args[args.size-1]! hs)  (<- CalcBitWidth args[args.size-2]! hs)
       return 1
@@ -216,8 +168,7 @@ partial def CalcBitWidth (e : Expr) (hs : Array (TSyntax `ident)) : MetaM Nat :=
       return 1
 
 
-
-
+/-- Small helper for choosing the smallest bit-width representing numbers below `n`. -/
 def ceilLog2 (n : Nat) : Nat :=
   if n ≤ 1 then
     0
@@ -226,121 +177,16 @@ def ceilLog2 (n : Nat) : Nat :=
     lg + 1
 
 
-lemma sub_add_right_recursive_paren_l (a b c:ZMod p): (a-b) + c = a+c -b := by
-  ring
-
-lemma sub_add_right_recursive_paren_r (a b c:ZMod p): c + (a-b)  = a+c -b := by
-  ring
-
-lemma BitVec.ofNat_mod_move
-    {f n w: Nat}
-    [h: NeZero f]
-    [h2: NeZero w]
-    (hn : n < 2^w)
-    (hf : f <  2^w) :
-  BitVec.ofNat w (n % f)
-    =
-  BitVec.ofNat w n % BitVec.ofNat w f := by
-  unfold BitVec.ofNat
-  --simp
-  apply congrArg
-  simp_all
-  apply Fin.eq_of_val_eq
-  simp_all
-  rw [Nat.mod_eq_of_lt]
-  nth_rewrite 3 [Nat.mod_eq_of_lt]
-  nth_rewrite 3 [Nat.mod_eq_of_lt]
-  simp
-  apply hf
-  apply hn
-  have h2: n % f < f := by
-      apply Nat.mod_lt
-      apply (Nat.pos_of_ne_zero h.out)
-  simp
-  apply lt_trans h2
-  apply hf
-
-
-lemma ZMod.val_le_BV {n : ℕ} [k: NeZero n] (a : ZMod n) (w : ℕ ) (h: n< 2^w) : BitVec.ofNat w (a.val) ≤ BitVec.ofNat w (n) := by
-   unfold BitVec.ofNat
-   simp
-   rw [Nat.mod_eq_of_lt]
-   rw [Nat.mod_eq_of_lt]
-   apply ZMod.toNatLT
-   apply Nat.pos_of_ne_zero (k.ne n)
-   apply h
-   apply (lt_trans (ZMod.val_lt a) h)
-
-
-
-lemma ZMod.val_sub_strict {f} [NeZero f]   (x y: ZMod f) : (x - y).val = (x.val + f - y.val ) % f
-  := by
-  by_cases h: y.val <= x.val
-  --rw [<- Nat.add_mod_right]
-  rw [ZMod.val_sub]
-  have h1: (x.val - y.val) % f = (x.val - y.val)  := by
-    rw [Nat.mod_eq_of_lt]
-    apply Nat.lt_of_le_of_lt
-    apply Nat.lt_sub
-    apply ZMod.val_lt
-  have h2 : (x.val - y.val) % f = (x.val + f - y.val) % f  := by
-    rw [<- Nat.add_comm]
-    rw [<- Nat.add_mod_right]
-    rw [<- Nat.add_comm]
-    rw [Nat.add_sub_assoc]
-    apply h
-  rw [<- h1]
-  rw [<- h2]
-  apply h
-  have hxy : x - y = x + (-y) := by ring_nf
-  rw [hxy]
-  rw [ZMod.val_add]
-  rw [ZMod.neg_val']
-  simp
-  rw [Nat.add_sub_assoc]
-  apply ZMod.val_le
-
-
-
--- lemma neg_add_to_sub {α : Type*} [AddCommGroup α] (a b : α) :
---   -a + b = b - a := by
---   rw [sub_eq_add_neg]
---   rw [add_comm (-a) b]
-
-
-
-lemma duplicate {b  a: ZMod f} : b = a <->
-  b = a /\ b = a := by
-  simp
-
-lemma duplicate_leq {b a: Nat} : b <= a <->
-  b <= a /\ b <= a := by
-  simp
-
--- lemma sub_add_right_recursive {α : Type*} [AddCommGroup α]
---     (a b c : α) : a - b + c = (a + c) - b := by
---   rw [sub_eq_add_neg, add_assoc]
---   rw [sub_eq_add_neg]
---   rw [add_comm (-b) (c)]
---   rw [add_assoc]
-
-/-- Detect `BitVec.ofNat k (ZMod.val x)` with debugging prints. -/
+/-- Detect `BitVec.ofNat k (ZMod.val x)`. -/
 def matchOfNatVal? (e : Expr) : MetaM (Option (Nat × Expr × Expr)) := do
   let fn := e.getAppFn
   let args := e.getAppArgs
 
-  -- Debug
-  --logInfo m!"{fn}"
-  --logInfo m!"{args}"
-  -- We expect: BitVec.ofNat k (ZMod.val x)
   if fn.isConstOf ``BitVec.ofNat ∧ args.size = 2 then
-   --logInfo m!"{fn}"
     let kExpr := args[0]!
     let valExpr := args[1]!
     match kExpr.getAppFn with
     | Expr.const ``OfNat.ofNat _ =>
-        --logInfo m!"    Found nat literal width = {kExpr}"
-       -- logInfo m!"    kExpr.args = {kExpr.getAppArgs}"
         match kExpr.getAppArgs with
         | #[_, numExpr, _inst] =>
             match numExpr with
@@ -350,15 +196,10 @@ def matchOfNatVal? (e : Expr) : MetaM (Option (Nat × Expr × Expr)) := do
                let args2 := valExpr.getAppArgs
 
                 if fn2.isConstOf ``ZMod.val ∧ args2.size = 2 ∧ args1.size=3 then
-                 -- logInfo m!"Ecuse me? {args2}"
                   return some (k, args2[1]!, args2[0]!)
                 if fn2.isConstOf ``GetElem ∧ args2.size = 2 ∧ args1.size=3 then
-                   --logInfo m!"{fn2}"
                    return some (k, args2[1]!, args2[0]!)
                 else
-                  --  logInfo m!"{valExpr}"
-                  --  logInfo m!"{fn2}"
-                  --  logInfo m!"{args2}"
                   return none
             | _ => return none
 
@@ -369,13 +210,10 @@ def matchOfNatVal? (e : Expr) : MetaM (Option (Nat × Expr × Expr)) := do
     return none
 
 
-
-
+/-- Detect whether exactly one side of a relation contains an external `% n`. -/
 def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
     let ty ← instantiateMVars ty
-    --let ty ← whnf ty
     let (fn, args) := ty.getAppFnArgs
-    -- extract the two sides of a relation (we consistently take the last two args)
     let sides? : Option (Expr × Expr) :=
       match fn with
       | ``Eq    => if args.size >= 2 then some (args[args.size-2]!, args[args.size-1]!) else none
@@ -387,9 +225,7 @@ def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
     match sides? with
     | none => pure (none)
     | some (lhs, rhs) =>
-        -- get `% n` modulus if expression is `Nat.mod _ n` with numeral n
         let getModLit (e : Expr) :  MetaM (Option (Expr × Nat)) := do
-          --let e ← whnf e
 
           let (f, as) := e.getAppFnArgs
 
@@ -404,7 +240,6 @@ def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
                    match as2[as2.size-2]! with
                       | Expr.lit (Literal.natVal n) => pure (some (as[as.size-2], n))
                       | _ => pure ( none )
-                   --pure (some 2)
                 | _ => pure none
               else
                 pure none
@@ -418,7 +253,7 @@ def externalModulusOneSide? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
         | _,      _      => pure none
 
 
-
+/-- Extend external modulus detection through top-level `Iff` and `And`. -/
 def externalModulusOneSideWrapper? (ty : Expr) : MetaM (Option (Expr × Nat)) := do
 let (fn, args) := ty.getAppFnArgs
     match fn with
@@ -445,12 +280,11 @@ let (fn, args) := ty.getAppFnArgs
        | _ => externalModulusOneSide? ty
 
 
+/-- Internal tactic used by translation to discharge external modulus side conditions. -/
 syntax (name := dbg_mod_syn) "dbg_mod" num "[" ident,* "]" : tactic
 
 elab_rules : tactic
   | `(tactic| dbg_mod $k:num [$ids:ident,*]) => do
-  let statsRef ← IO.mkRef ({ } : PhaseStats)
-      -- k : Syntax, ids : Array Syntax
   withMainContext do
     let k : Nat := k.getNat
 
@@ -459,39 +293,29 @@ elab_rules : tactic
     let oldGoals ← getGoals
 
      match (← externalModulusOneSideWrapper? goalTy) with
-    | none => pure ()--logInfo m!"{goalTy} not applicable"
+    | none => pure ()
     | some (exp, n) =>
         if k < n then
-        -- A : Prop := exp < k
           let A : Expr := mkApp2 (mkConst ``Nat.lt) exp (mkNatLit k)
 
-          -- pr : ?m : A  (this will become the "prove A" subgoal)
           let pr ← g.withContext do mkFreshExprMVar (some A)
 
-          -- add hypothesis hmod : A := pr to the original goal context
           let gWithHyp ← g.withContext do
-            -- NOTE: in your Lean, `assert` is MetaM, so lift it:
             liftMetaM <| g.assert (Name.mkSimple "hmod") A pr
 
-          -- prove A first, then solve original goal with hmod available
           let rest : List MVarId := oldGoals.erase g
 
-    -- set goals = prove A first, then continue with hypothesis, then the rest
           setGoals (pr.mvarId! :: gWithHyp :: rest)
 
           evalTactic (← `(tactic| try simp) )
           withMainContext do
             let g <- getMainGoal
-            --logInfo m!"{g}"
-            timeTacticPhase statsRef "range" do
-              evalTactic (← `(tactic| focus  try_apply_lemma_hyps [$[$ids],*] ))
+            evalTactic (← `(tactic| focus  try_apply_lemma_hyps [$[$ids],*] ))
           evalTactic (← `(tactic| try simp ) )
           let g ← getMainGoal
           let name := Name.mkSimple s!"proof"
           let (kId, g')  <- g.intro name
           replaceMainGoal [g']
-          let proofExpr := mkFVar kId
-          --evalTactic (← `(tactic| intro proof) )
           g.withContext do
             evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt] ))
             evalTactic (← `(tactic| swap ))
@@ -501,61 +325,17 @@ elab_rules : tactic
             let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
             evalTactic (← `(tactic|  rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
             evalTactic (← `(tactic| all_goals try apply $hcTerm))
-            -- evalTactic (← `(tactic| swap ))
-            -- withMainContext do
-            --   evalTactic (← `(tactic| all_goals try apply $hcTerm))
-            --   evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
-            -- evalTactic (← `(tactic| swap ))
-            -- evalTactic (← `(tactic| apply $hcTerm))
         else
           throwError "Why is modulus bigger? {k} and {n}"
-  printPhaseStats statsRef
-
-
--- /-- Recursively gather all `(width, x)` inside an expression -/
--- partial def collectMatches (e : Expr) : MetaM (Array (Nat × Expr)) := do
-
---   let mut acc := #[]
---   if let some p <- matchOfNatVal? e then
---     logInfo m!"  MATCHED pattern: {p}"
---   for a in e.getAppArgs do
---     acc := acc ++ (← collectMatches a)
---   return acc
-
-/-- Collect from goal AND hypotheses -/
-
-
-def exprInsert (k : Expr) (v : α) (l : List (Expr × α)) : MetaM (List (Expr × α)) := do
-  let mut out := []
-  let mut replaced := false
-  for (k', v') in l do
-    if ← isDefEq k k' then
-      out := (k, v) :: out
-      replaced := true
-    else
-      out := (k', v') :: out
-  if ¬ replaced then
-    out := (k, v) :: out
-  return out
-
-def exprLookup (k : Expr) (l : List (Expr × α)) : MetaM (Option α) := do
-  for (k', v) in l do
-    if ← isDefEq k k' then
-      return some v
-  return none
 
 
 /-- Recursively gather all `(width, x)` pairs inside an expression, for matches
     of the form `BitVec.ofNat k (ZMod.val x)`. -/
 partial def collectMatches (e : Expr) : MetaM (Array (Nat × Expr × Expr)) := do
   let mut acc := #[]
-  -- first inspect this node
   if let some p ← matchOfNatVal? e then
     acc := acc.push p
-    --logInfo m!"{acc}"
 
-  -- recursively explore all children
-  --logInfo m!"{e}"
   match e with
   | .app f x =>
       acc := acc ++ (← collectMatches f)
@@ -575,7 +355,6 @@ partial def collectMatches (e : Expr) : MetaM (Array (Nat × Expr × Expr)) := d
   | .proj _ _ b =>
       acc := acc ++ (← collectMatches b)
   | _ =>
-      --logInfo m!"{<- inferType e}"
       pure ()
 
   return acc
@@ -588,24 +367,17 @@ def collectFromContext : TacticM (Array (Nat × Expr × Expr)) := do
   let goalTy ← goal.getType
   goal.withContext do
     let mut out : Array (Nat × Expr × Expr) := #[]
-    --logInfo m!"Starting {goalTy}"
     out := out ++ (← collectMatches (goalTy))
-    --logInfo m!"GOT {out}"
     let lctx ← getLCtx
-    --logInfo "=== RAW HYP TYPES ==="
     for decl in lctx do
 
 
       if decl.isImplementationDetail then
         continue
 
-      --logInfo m!"Starting {decl.userName}: {← ppExpr decl.type}"
-      -- collect from hypothesis type
       let e <- instantiateMVars decl.type
       let e ← whnf e
       out := out ++ (← collectMatches e)
-      --logInfo m!"Gor {out}"
-      -- collect from hypothesis value (if any)
       if let some v := decl.value? then
         out := out ++ (← collectMatches v)
 
@@ -631,7 +403,6 @@ def lookupGroup (fid : Name) (gs : List (Name × Expr × List Nat))
   | none => none
 
 
-
 def insertGroup (fid : Name) (e:Expr) (w : Nat)
     (gs : List (Name × Expr × List Nat))
     : List (Name × Expr × List Nat) :=
@@ -645,56 +416,37 @@ def insertGroup (fid : Name) (e:Expr) (w : Nat)
         go ((fid',x, ws) :: acc) tl
   go [] gs
 
+/-- Add cast-width bridge lemmas for variables occurring at multiple bit-widths. -/
 syntax "autoCastBits" "[" ident,* "]" : tactic
 
 elab_rules : tactic
 | `(tactic| autoCastBits [$ids,*]) => do
-    --let names := ids.map (·.getId)
-    --logInfo m!"Parsed names: {names}"
-    -- your real logic here
-  --logInfo "=== autoCastBits: starting ==="
   let hyps := (ids.getElems.map (·.getId)).toList
+  /- Scan the current context for casts that need width-bridge lemmas. -/
   let pairsArr ← collectFromContext
   let pairs := pairsArr.toList
-  --logInfo m!"Detected pairs (width, expr): {pairs}"
 
-  -- Group widths by underlying variable, keyed by FVarId
   let mut groups : List (Name  × Expr × List Nat) := []
   let mut modulus : Option Expr := none
   for (w, x, f) in pairs do
     modulus := some f
     let myName := (<- collectTerms x).toList[0]!
-    --let fid := (<- collectTerms x).toList[0]!
-   -- if let some fid := x.fvarId? then
       match lookupGroup myName groups with
       | some ws =>
           groups := insertGroup myName x w groups
       | none =>
           groups := (myName, x, [w]) :: groups
-  --logInfo m!"=== Groups after aggregation ==="
-  --  for (fid, ws) in groups do
-  --    logInfo m!"{fid}: widths = {ws}"
 
   let some modExpr := modulus
     | throwError "[autoCastBits] no modulus found"
   let lctx ← getLCtx
   let mut goal ← getMainGoal
 
-  -- For each variable that appears with multiple distinct widths, create a lemma
   for (fid, x, ws) in groups do
 
     let uniq := ws.eraseDups
-    --if uniq.length > 1 then
-      --let minW := uniq.foldl Nat.min uniq.head!
     let maxW := uniq.foldl Nat.max uniq.head!
 
-        -- reconstruct the variable and get a nicer name
-      --let x := Expr.fvar fid
-    --logInfo m!"{x}, {ws}"
-          -- match lctx.find? fid with
-          -- | none =>
-          --     pure ()
-          -- | some decl => do
     let baseName := fid
     for w in ws do
        if w != maxW then
@@ -704,8 +456,6 @@ elab_rules : tactic
                   let zmodValTyped := mkApp zmodValBase modExpr
                   let valExpr := mkApp zmodValTyped x
 
-                  -- lhs : BitVec.ofNat minW (ZMod.val x)
-                  --logInfo m!"x = {← ppExpr x}"
                   let lhs :=
                     mkAppN (mkConst ``BitVec.ofNat) #[mkNatLit w, valExpr]
 
@@ -719,18 +469,13 @@ elab_rules : tactic
 
 
                   let eq <- mkEq lhs rhs
-                  --logInfo m!"Adding lemma {eq} for {baseName}: minW={minW}, maxW={maxW}"
 
-                  -- Build the proof by `simp`
                   let pf ← elabTerm (← `(by simp)) eq
-                  --let mut goal2 <- getMainGoal
-                  --goal ← getMainGoal
                   let newGoal ← goal.assert lemmaName eq pf
                   goal := newGoal
 
 
               replaceMainGoal [goal]
-              -- HARD CODED FIX
      let bitsStx : TSyntax `term := Syntax.mkNumLit (toString maxW)
     if maxW > 250 then
 
@@ -749,99 +494,21 @@ elab_rules : tactic
       let lctx ← getLCtx
 
       for c in hyps do
-        --logInfo m!"{c}"
         try
-          -- ✅ resolve the Name `c` to a real local hypothesis
           let some decl := lctx.findFromUserName? c
-            | throwError m!"❌ Cannot find hypothesis {c}"
+            | throwError m!"Cannot find hypothesis {c}"
 
           let hIdent := Lean.mkIdent decl.userName
 
-          -- ✅ specialize hIdent with a TERM
           evalTactic (← `(tactic| specialize $hIdent $bitsStx (by decide)))
 
-          -- ✅ simp at that hypothesis
-        -- evalTactic (← `(tactic| simp at $(mkIdent c):ident))
 
         catch e =>
           pure ()
-          --logInfo m!"{e.toMessageData}"
 
     goal ← getMainGoal
 
-
-
-
-
-
-
-
-lemma ZMod.val_neg_sub_zero {p : Nat} {x : ZMod p} : (-x : ZMod p) = (0 - x) := by
-  simpa using (zero_sub x).symm
-
-
-
-
-
-
-
-
-
-
-def isExists (e : Expr) : Bool :=
-  match e with
-  | .app (.app (.const ``Exists _) _) (.lam _ _ _ _) => true
-  | _ => false
-
-
---- Go into bitVec.ofNat
-
-
-def compositeInsideIfHere? (e : Expr) : MetaM (Option Expr) := do
-  --let e ← whnf e
-  if e.isAppOf ``ite then
-    let args := e.getAppArgs
-
-    if h : args.size > 1 then
-      let cond := args[1]
-
-      -- Normalize (optional but safer)
-
-      -- Check if it's an equality
-      if cond.isAppOf ``Eq then
-        let eqArgs := cond.getAppArgs
-        -- eqArgs = #[α, lhs, rhs] because Eq α lhs rhs has implicit type param α
-        if h2 : eqArgs.size > 1 then
-          let lhs := eqArgs[1]
-            if lhs.isAppOf ``getElem then
-                let lhsArgs := lhs.getAppArgs
-                if lhsArgs.size > 5 then
-                  if lhsArgs[5]!.isAppOf ``BitVec.ofNat then
-                        return some lhsArgs[5]!
-            -- else
-            --    let lhsArgs := lhs.getAppArgs
-            --    if lhsArgs.size > 5 then
-            --     if lhsArgs[5]!.isAppOf ``BitVec.toNat then
-                        -- logInfo m!"{lhs}"
-                        --return some cond
-  pure none
-
-/-- DFS for first subterm of the form `ZMod.val t` where `t` is composite
-(arithmetic-headed). -/
- def firstCompositeInsideIf? (e : Expr) : MetaM (Option Expr) := do
-  if let some t ← compositeInsideIfHere? e then
-    return some t
-  match e with
-  | .app f a =>
-      if let some r ← firstCompositeInsideIf? f then return some r
-      firstCompositeInsideIf? a
-  | .mdata _ b => firstCompositeInsideIf? b
-  | .proj _ _ b => firstCompositeInsideIf? b
-  | _ =>
-    pure none
-
-
-
+/-- Introduce all leading binders with generated names. -/
 partial def introAll (i : Nat := 0) (revNames : List Name := []) : TacticM (List Name) := do
   let name := Name.mkSimple s!"h{i}"
   let g ← getMainGoal
@@ -852,20 +519,17 @@ partial def introAll (i : Nat := 0) (revNames : List Name := []) : TacticM (List
   introAll (i + 1) (name :: revNames)
 
 
-
+/-- Count subtraction nodes in an expression after metavariable instantiation. -/
 partial def countMinusOps2 (e : Expr) : MetaM Nat := do
-  -- print the head for debugging
   let e ← instantiateMVars e
 
 
-  -- detect subtraction at this node
   let here :=
     match e.getAppFn with
     | .const n _ =>
         if n == ``HSub.hSub || n == ``Sub.sub || n == ``Nat.sub then 1 else 0
     | _ => 0
 
-  -- recurse structurally over ALL Expr forms
   match e with
   | .app _ _ =>
       let args := e.getAppArgs
@@ -894,6 +558,7 @@ partial def countMinusOps2 (e : Expr) : MetaM Nat := do
   | .const _ _ | .sort _ | .lit _ | .bvar _ | .fvar _ | .mvar _ =>
       return here
 
+/-- Count top-level and nested conjunction nodes. -/
 partial def countAnds (e : Expr) : Nat :=
   let e := e.consumeMData
 
@@ -914,6 +579,7 @@ partial def countAnds (e : Expr) : Nat :=
       | _ => 0
 
 
+/-- Count top-level and nested disjunction nodes. -/
 partial def countOrs (e : Expr) : Nat :=
   let e := e.consumeMData
 
@@ -934,12 +600,10 @@ partial def countOrs (e : Expr) : Nat :=
       | _ => 0
 
 
-
 @[tactic translateHypothesis]
 elab_rules : tactic
 | `(tactic| translate_hypothesis $h:ident [$ids,*] [$non_v,*] $[$b:term]? ) => withMainContext do
-  let statsRef ← IO.mkRef ({ } : PhaseStats)
-  /- Build simpArg array (empty if none provided) -/
+  /- Build simpArg array (empty if none provided). -/
   let mut sargs :
     Array (TSyntax [`Lean.Parser.Tactic.simpStar,
                     `Lean.Parser.Tactic.simpErase,
@@ -950,7 +614,6 @@ elab_rules : tactic
                         `Lean.Parser.Tactic.simpErase,
                         `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
       sargs := sargs.push ua
-  let hName := h.getId   -- the Name of the identifier
   let all : Array Lean.Ident := ids ++ non_v
   let flag ←
     match b with
@@ -962,12 +625,14 @@ elab_rules : tactic
   evalTactic (← `(tactic| try unfold BVModEq.smtSignExtend at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try unfold BVModEq.smtZeroExtend at $(mkIdent h.getId):ident ))
   evalTactic (← `(tactic| try unfold BVModEq.BitVec.mod at $(mkIdent h.getId):ident ))
+  /- Expand CirC/BVModEq mapping definitions before normalization. -/
   let mut circLoop := true
   while (circLoop) do
   try
     evalTactic (← `(tactic|  rw [map_f_to_bv_circ_spec] at $(mkIdent h.getId):ident) )
   catch _ =>
     circLoop := false
+  /- Normalize subtraction-heavy expressions into the shapes expected by later lemmas. -/
   let mut subLoop := true
   while (subLoop) do
     try
@@ -1003,11 +668,8 @@ elab_rules : tactic
       | throwError m!"No hypothesis named {h.getId}"
     let ty ← instantiateMVars decl.type
     let ty ← whnfR ty
-    --logInfo m!"{ty}"
     pure (countAnds decl.type + countOrs ty)
-  --logInfo m! "MINUSES HIP {i}"
 
-  -- TO DO THIS SHOULD BE A TRY CATCH LOOP!
   if i > 0 then
     let mut mLoop := true
     while (mLoop) do
@@ -1044,19 +706,12 @@ elab_rules : tactic
         | _ :: [] => throwError "wrong number of goals"
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
-            --logInfo m!"LAST: {g_last}"
-            -- let last := cur_g.getLast!
-            -- let init := cur_g.dropLast
-            -- focus only the last goal
             withMainContext  do
-              timeTacticPhase statsRef "range" do
-                 evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$all],*]))
+               evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$all],*]))
             let after ← getGoals
-            --logInfo m!"CUR GOALS: {after}"
             if after.isEmpty then
               setGoals ( [g_one] ++ rest_rev)
               evalTactic (← `(tactic| try valify [$[$sargs],*]  at $(mkIdent h.getId):ident))
-               --evalTactic (← `(tactic| try valify [$[$sargs],*]
             else
               throwError "lemma application did not solve goal"
 
@@ -1067,37 +722,15 @@ elab_rules : tactic
         catch _ =>
           progress := false
     evalTactic (← `(tactic| try valify [$[$sargs],*]  at $(mkIdent h.getId):ident))
-    -- let i ← withMainContext do
-    -- let lctx ← getLCtx
-    -- let isTrue ← withMainContext do
-    --   let lctx ← getLCtx
-    --   let some decl := lctx.findFromUserName? h.getId
-    --     | throwError m!"No hypothesis named {h.getId}"
-
-    --   let ty ← instantiateMVars decl.type
-    --   let ty ← whnf ty
-
-    --   pure <| match ty with
-    --     | Expr.const ``True _ => true
-    --     | _ => false
-    -- if isTrue then
-    --   throwError m!"Simplified too much"
-  --catch _ => pure ()
-  --subLoop := true
 
 
---   --- BEFORE WE CALC BIT WIDTH WE SHOULD REMOVE MOD?
---   --- x % f < 2^N  /\ x < f --> x <
---   --- ideally we only have to do x < 2^N /\
   let m ← withMainContext do
     let lctx ← getLCtx
     let some decl := lctx.findFromUserName? h.getId
       | throwError m!"No hypothesis named {h.getId}"
     CalcBitWidth decl.type ids
- -- logInfo m!"FIRST  {m}"
   let bitsize := ceilLog2 (Nat.max (m+1) 4)
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
-  --logInfo m!"{bitsize} with {m}"
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx] at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_leq_iff $bitsizeStx] at $(mkIdent h.getId):ident))
   evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident))
@@ -1128,9 +761,7 @@ elab_rules : tactic
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
             withMainContext  do
-             -- logInfo m!"{g_last}"
-              timeTacticPhase statsRef "range" do
-                evalTactic (← `(tactic| try focus try_apply_lemma_hyps [$[$all],*]))
+              evalTactic (← `(tactic| try focus try_apply_lemma_hyps [$[$all],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ([g_one] ++ rest_rev)
@@ -1138,7 +769,6 @@ elab_rules : tactic
             else
               throwError m! "try_apply failed {after}"
       catch e =>
-        --logInfo (Lean.Exception.toMessageData e)
         try
           evalTactic (← `(tactic| rw [BitVec.ofNat_mod_move] at $(mkIdent h.getId):ident) )
           evalTactic (← `(tactic| try bvify [$[$sargs],*] at $(mkIdent h.getId):ident) )
@@ -1149,25 +779,15 @@ elab_rules : tactic
           catch _ =>
             subLoop := false
     evalTactic (← `(tactic|  try simp (config := { zeta := false, beta := false }) at $(mkIdent h.getId):ident) )
-  printPhaseStats statsRef
 
 
+/-- Translate the current goal into a bitvector-friendly form. -/
 syntax (name := translateGoal)
   "translate_goal" ppSpace ("[" ident,* "]")? (ppSpace term)? : tactic
 
--- def noteRhs (rhs : Expr) : TacticM Name := do
---   let g ← getMainGoal
---   withMVarContext g do
---     let rhsName ← mkFreshUserName `rhs
---     let rhsTy ← inferType rhs  -- should be Bool if it’s an if-condition
---     let (fvarId, g') ← g.note rhsName rhsTy rhs
---     setMainGoal g'
---     return rhsName
 
-
+/-- Detect a `BitVec.ofNat` whose payload is arithmetic-headed. -/
 private def compositeInsideBVHere? (e : Expr) : MetaM (Option Expr) := do
-  -- If you want, uncomment:
-  -- let e ← whnf e
 
   if e.isAppOf ``BitVec.ofNat then
     let args := e.getAppArgs
@@ -1178,26 +798,23 @@ private def compositeInsideBVHere? (e : Expr) : MetaM (Option Expr) := do
 
 private def isEqRecLike (e : Expr) : Bool :=
   e.isConstOf ``Eq.rec || e.isConstOf ``Eq.ndrec
-/-- DFS for first subterm of the form `ZMod.val t` where `t` is composite
-(arithmetic-headed). -/
+
+
+/-- Find the first composite expression occurring inside `BitVec.ofNat`. -/
 partial def firstCompositeInsideBV?
     (seen : HashSet UInt64) (e : Expr)
     : MetaM (Option Expr ) := do
 
   let e := e.consumeMData
 
-  -- 0️⃣ If already seen, stop immediately
   let h := e.hash
   if seen.contains h then
     return none
-  --let g <- getMainGoal
   if e.isFVar then return none
-  --let e <- whnf e
   let e := e.consumeMData
   match (← compositeInsideBVHere? e) with
   | some hit => return some hit
   | none =>
-    -- DFS
     match e with
     | .app f a =>
         if isEqRecLike f then
@@ -1210,6 +827,7 @@ partial def firstCompositeInsideBV?
     | _ =>
       pure none
 
+/-- Repeatedly extract and translate composite `BitVec.ofNat` subterms until stable. -/
 partial def loopUntilDone
     (flag : Bool)
     (hs : Array (TSyntax `ident))
@@ -1229,65 +847,32 @@ partial def loopUntilDone
     `(true)
   else
     `(false)
-  --logInfo m!"What {t2}"
   let t2 ← withReducible <| whnf t2
   let res ← g.withContext do
       firstCompositeInsideBV? seen t2
-  --logInfo m!"How {res}"
   match res with
   | none =>
-      --logInfo "✅ Done — no composite expressions left inside any `if`."
       return seen?.getD {}
 
   | some if_comp =>
-      -- Show we found something
 
-        --logInfo m!"🔍 Found composite: {if_comp}"
-
-        -- Turn Expr into Syntax so we can splice it
 
         withMainContext do
-        -- 1) work with Expr directly (no delab)
           let big ← instantiateMVars if_comp
           let bigTy ← inferType big
-          -- let (kId, g1) ← (← getMainGoal).note `k bigTy big
-          -- replaceMainGoal [g1]
-          --logInfo m!"big = {big}"
-          --logInfo m!"bigTy = {bigTy}"
-          -- logInfo m!"bigTy whnf = {(← whnf bigTy)}"
-        -- let k := mkFVar kId
-        -- let eq <- mkEq k big    -- EXACTLY: k = (BitVec.ofNat ...)[0]
-        -- let g2 ← getMainGoal
-        -- let pf ← elabTerm (← `(by rfl)) eq
-        -- let lemmaName := Name.mkSimple s!"hc"
-        -- let g' <- g2.assert lemmaName eq pf
-        -- replaceMainGoal [g']
 
-        -- define kc := big  (context local def, like `set`)
           let g ← getMainGoal
           let g ← g.define `kc bigTy big
           let name := Name.mkSimple s!"k"
           let (kId, g)  <- g.intro name
           g.withContext do
-        --   replaceMainGoal [g]
 
-        -- withMainContext do
-        -- -- add hc : kc = big
-          -- withMainContext do
-            -- let big ← instantiateMVars if_comp
-            -- let bigTy ← inferType big
-            -- let lctx ← getLCtx
-            -- let some kcDecl := lctx.findFromUserName? `k
-              --   | throwError "kc missing"
             let kc' := mkFVar kId
 
             let eq <- mkEq kc' big
 
-           --logInfo m!"Adding lemma {eq} for {baseName}: minW={minW}, maxW={maxW}"
 
-          --           -- Build the proof by `simp`
               let pf ← elabTerm (← `(by rfl)) eq
-          --           --let mut goal2 <- getMainGoal
               let lemmaName := Name.mkSimple s!"hc"
               let newGoal ← g.assert lemmaName eq pf
               let lemmaName0 := Name.mkSimple s!"hc0"
@@ -1309,49 +894,20 @@ partial def loopUntilDone
 
               evalTactic (← `(tactic| try simp [<- $hcIdent]))
               evalTactic (← `(tactic| translate_hypothesis $hcIdent [$hs,*] [] $flagStx ))
-        --       let mut progress := true
-        --       while (progress ) do
-        --         try
-        --           evalTactic (← `(tactic|  rw [$hcRw ]))
-        --         catch e  =>
-        --           --logInfo m!"{e.toMessageData}"
-        --           progress := false
               evalTactic (← `(tactic| try simp [$hcLemma]))
 
               let lctx ← getLCtx
-              let some decl := lctx.findFromUserName? `k
-                | throwError "k not found"
-              let kId : FVarId := decl.fvarId
-              --evalTactic (← `(tactic| clear k ))
-              -- evalTactic (← `(tactic| clear $hcTerm))
         let key : UInt64 := if_comp.hash
 
         seen := seen.insert key
 
-        -- continue
         loopUntilDone flag hs (count + 1) (some seen)
-
-            --         goal := newGoal
-            -- let hcPf <- mkEqRefl big
-          -- let g ← getMainGoal
-          -- let (k,g') ← g.note `hc hcTy hcPf
-          --replaceMainGoal [newGoal]
-        --evalTactic (← `(tactic| focus let kc := $(ifSyn) ))
-
-      -- -- Call your custom tactic on it
-      --   evalTactic (← `(tactic| translate_hypothesis hc [$hs,*] [] $flagStx ))
-
-      -- --     -- -- Simplify the goal using this new equality
-      --   evalTactic (← `(tactic|  try simp [hc]))
-
-      --     -- -- Recurse on updated goal
 
 
 @[tactic translateGoal]
 elab_rules : tactic
 | `(tactic| translate_goal [$ids,*] $[$b:term]? ) => withMainContext do
-  let statsRef ← IO.mkRef ({ } : PhaseStats)
-  /- Build simpArg array (empty if none provided) -/
+  /- Build simpArg array (empty if none provided). -/
   let mut sargs :
     Array (TSyntax [`Lean.Parser.Tactic.simpStar,
                     `Lean.Parser.Tactic.simpErase,
@@ -1405,24 +961,17 @@ elab_rules : tactic
       subLoop := false
   let mut mLoop := true
   evalTactic (← `(tactic| try rw [sub_add_right_recursive_paren_l]))
-  --evalTactic (← `(tactic| try rw [sub_add_right_recursive_paren_r] ))
   while (mLoop) do
     try
       evalTactic (← `(tactic| rw [sub_add_right_recursive]))
 
-     --evalTactic (← `(tactic| rw [sub_add_right_recursive]))
     catch _ =>
       mLoop := false
   let mut g ← getMainGoal
   let mut t ← g.getType
-  -- if isExists t then
-  --      evalTactic (← `(tactic| refine ?_))
   let i  ←  countMinusOps2 t
   let k := countOrs t + countAnds t
-  --logInfo m! "MINUSUS {i} for ORS {k}"
 
-  --TO DO THIS SHOULD BE A TRY CATCH LOOP!
- -- if i > 0 then
   evalTactic (← `(tactic| try simp (config := { maxSteps := 200000 }) only [BVModEq.ZMod.eq_if_val] ))
   evalTactic (← `(tactic| try rw [<- sub_eq_add_neg]))
   evalTactic (← `(tactic| try rw [neg_add_to_sub]))
@@ -1432,9 +981,8 @@ elab_rules : tactic
   evalTactic (← `(tactic| try rw [neg_add_to_sub]))
   let mut goals <- getGoals
   if goals.isEmpty then
-    logInfo m!"SOLVED"
+    logInfo m!"Goal solved during translation."
     return
-  --evalTactic (← `(tactic| try simp [-neg_mul, -one_mul, -mul_one] ))
   if k > 0 then
     subLoop := true
     while (subLoop) do
@@ -1461,8 +1009,7 @@ elab_rules : tactic
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
             withMainContext  do
-                timeTacticPhase statsRef "range" do
-                  evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
+                evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ([g_one] ++ rest_rev)
@@ -1471,74 +1018,40 @@ elab_rules : tactic
               throwError "lemma application did not solve goal"
 
       catch e =>
-        --logInfo m!"{e.toMessageData}"
         try
           evalTactic (← `(tactic| rw [ZMod.val_sub_strict]))
           evalTactic (← `(tactic| try valify [$[$sargs],*]))
         catch e =>
-         -- logInfo m!"{e.toMessageData}"
           progress := false
-     -- evalTactic (← `(tactic| try valify [$[$sargs],*]))
 
-  -- -- --l--ogInfo m! "HERE?"
   evalTactic (← `(tactic| try simp   ) )
 
 
-  -- -- -- --- FOR DEBUGGING REMOVE LATER PLEASE
   let mut rmFailed := false
+  /- Pull out composite `BitVec.ofNat` subterms and translate them recursively. -/
   let seen <- loopUntilDone flag ids (count+1)
   goals <- getGoals
   if goals.isEmpty then
-    logInfo m!"SOLVED"
+    logInfo m!"Goal solved during translation."
     return
-  --logInfo m!"{<-goals[0]!.getType}"
   let m <- withMainContext do  CalcBitWidth (<-goals[0]!.getType) ids
-  --let bitsize :=  ceilLog2 (2^512)
-  --logInfo m!"FIRST  {m}"
   let bitsize := ceilLog2 (Nat.max (m+1) 4)
   let bitsize_full := Nat.pow 2 bitsize
   let bitsizeStx : TSyntax `term := Syntax.mkNumLit (toString bitsize)
   let bitsizeStx_full : TSyntax `num := Syntax.mkNumLit (toString bitsize_full)
 
-  --logInfo m!"BIT SIZE {bitsize} with {m}"
 
   try
       evalTactic (← `(tactic| dbg_mod $bitsizeStx_full [$[$ids],*]))
-      -- let hcTerm  : TSyntax `term  := ⟨mkIdent `proof⟩
-      -- evalTactic (← `(tactic|  rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
-      -- evalTactic (← `(tactic| swap ))
-      -- evalTactic (← `(tactic| focus try_apply_lemma_hyps [$[$ids],*]))
-      -- evalTactic (← `(tactic| swap ))
-      -- evalTactic (← `(tactic| apply $hcTerm))
 
-      --   evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
-      --   let cur_g ← getGoals
-      --   match cur_g with
-      --   | [] =>
-      --       throwError "❌ No goals after Nat.mod_eq_of_lt"
-      --   | _ :: []  =>
-      --       throwError "❌ wrong number of goals left after Nat.mod_eq_of_lt"
-      --   | g_one :: g_last :: rest_rev => do
-      --       setGoals [g_last]
-      --       evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
-      --       let after ← getGoals
-      --       if after.isEmpty then
-      --         setGoals ( [g_one ] ++ rest_rev )
-      --         evalTactic (← `(tactic| try bvify [$[$sargs],*]))
 
-      --       else
-      --         throwError m! "try_apply failed {after}"
   catch e =>
-      --logInfo m!"ERROR BAD: {e.toMessageData}"
       pure ()
-  --     --rmFailed := true
 
-  --logInfo m!"{seen.size}"
+  /- Rewrite the goal from natural-number equalities into bitvector equalities. -/
   evalTactic (← `(tactic| try rw [BVModEq.BitVec_ofNat_eq_iff $bitsizeStx ]))
   evalTactic (← `(tactic| try bvify [$[$sargs],*]))
 
-  -- -- --let n := countAnds t + k
-  -- logInfo m!"ORS: {k} & MIN :{i}"
   subLoop := true
   if k > 0 then do
     while (subLoop) do
@@ -1552,21 +1065,18 @@ elab_rules : tactic
   subLoop := true
   while (subLoop ) do
       count :=count + 1
-      -- if rmFailed then
-      --   throwError "We already tried removal"
       try
         evalTactic (← `(tactic| rw [Nat.mod_eq_of_lt]))
         let cur_g ← getGoals
         match cur_g with
         | [] =>
-            throwError "❌ No goals after Nat.mod_eq_of_lt"
+            throwError "No goals after Nat.mod_eq_of_lt"
         | _ :: []  =>
-            throwError "❌ wrong number of goals left after Nat.mod_eq_of_lt"
+            throwError "Unexpected number of goals after Nat.mod_eq_of_lt"
         | g_one :: g_last :: rest_rev => do
             setGoals [g_last]
             withMainContext  do
-                 timeTacticPhase statsRef "range" do
-                    evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
+                  evalTactic (← `(tactic| try try_apply_lemma_hyps [$[$ids],*]))
             let after ← getGoals
             if after.isEmpty then
               setGoals ( [g_one ] ++ rest_rev )
@@ -1576,12 +1086,10 @@ elab_rules : tactic
               throwError m! "try_apply failed {after}"
       catch e =>
         rmFailed := false
-        --logInfo m!"WHY {e.toMessageData}"
         try
           evalTactic (← `(tactic| rw [BitVec.ofNat_mod_move]))
           evalTactic (← `(tactic| try bvify [$[$sargs],*]))
         catch e =>
-           --logInfo m!"WHY {e.toMessageData}"
            try
              evalTactic (← `(tactic| rw  [Mathlib.Tactic.BVify.BitVec.ofNat_sub]))
              evalTactic (← `(tactic| try bvify [$[$sargs],*]))
@@ -1589,17 +1097,9 @@ elab_rules : tactic
               subLoop := false
   evalTactic (← `(tactic| try simp  ))
   let x <-loopUntilDone flag ids (count+1)
-  printPhaseStats statsRef
 
 
-
-
-
-
-
-
-  -- loopUntilDone flag
-
+/-- Recognize an idempotent equality over `ZMod` terms. -/
 def isZModIdemEq (e : Expr) : Option Expr :=
   match e with
   | .app (.app (.app (.const ``Eq _) _) lhs) rhs =>
@@ -1636,69 +1136,10 @@ def flattenAnds (h : TSyntax `ident) : TacticM (Array (TSyntax `ident)) :=
     if num == 1 then
       return #[h]
 
-    -- perform `rcases h with ⟨h1, h2, ..., hn⟩`
     let names : Array (TSyntax `ident) :=
       (List.range num).map (fun i => mkIdent (Name.mkSimple s!"{h.getId}_{i+1}")) |>.toArray
     evalTactic (← `(tactic| rcases $(mkIdent h.getId):ident with ⟨$[$names],*⟩))
     return names
-
-/-- If the goal is `x < rhs` or `x ≤ rhs` and `x` is an fvar,
-    return `some (lhsFVarId, rhs)`. Otherwise return `none`. -/
-def detectLeOrLtGoal (goalExpr : Expr) : Option (FVarId × Expr) :=
-  match goalExpr with
-  -- x < rhs
-  | .app (.app (.const ``LT.lt _) lhs) rhs =>
-      if lhs.isFVar then
-        some (lhs.fvarId!, rhs)
-      else
-        none
-  -- x ≤ rhs
-  | .app (.app (.const ``LE.le _) lhs) rhs =>
-      if lhs.isFVar then
-        some (lhs.fvarId!, rhs)
-      else
-        none
-  | _ =>
-      none
-
-
-def addZModValBounds (bits : Nat) : TacticM (Array (TSyntax `ident)) := do
-  let lctx ← getLCtx
-  let bitsStx : TSyntax `term := Syntax.mkNumLit (toString bits)
-
-  let mut out : Array (TSyntax `ident) := #[]
-
-  for decl in lctx do
-
-    if decl.isImplementationDetail || decl.isAuxDecl then
-      continue
-
-    let ty ← whnf decl.type
-    let fn := ty.getAppFn
-    let args := ty.getAppArgs
-    --logInfo m!"{fn} for {ty}"
-    match fn with
-    | Expr.const ``Fin _ =>
-        -- Declare hypothesis name
-        let uname := decl.userName
-        let hname := Name.mkSimple s!"h_val_{uname}"
-        let hident : TSyntax `ident := mkIdent hname
-        let xStx ← Term.exprToSyntax decl.toExpr
-
-        -- Generate lemma:
-        let tac ← `(tactic|
-          have $hident :=
-            ZMod.val_le_BV $xStx $bitsStx (h := by decide)
-        )
-        evalTactic tac
-        --evalTactic (← `( tactic| try simp at $(mkIdent hident.getId):ident))
-
-        out := out.push hident
-
-    | _ => pure ()
-
-  return out
-
 
 def smartTranslateOne
     (h : TSyntax `ident)
@@ -1708,20 +1149,16 @@ def smartTranslateOne
                       `Lean.Parser.Tactic.simpLemma]))
                         (varToHypRef : IO.Ref (Std.HashMap FVarId (TSyntax `ident))): TacticM ( Option (TSyntax `ident) × Option (TSyntax `ident ) × Option (TSyntax `ident ) × Option (TSyntax `ident)) := do
     withMainContext do
-    -- Retrieve hypothesis declaration safely
 
     let lctx ← getLCtx
     let some decl := lctx.findFromUserName? h.getId
       | throwError m!"no hypothesis `{h.getId}` in local context"
 
     let hIdent : TSyntax `ident := mkIdent decl.userName
-    --logInfo m! "We are here?"
     let hType ← whnf decl.type
     match isZModIdemEq hType with
     | some _ => do
-        --logInfo m! "we are we not here..."
         evalTactic (← `(tactic| rw [BVModEq.square_eq_one_zero 257] at $(mkIdent h.getId):ident))
-        -- name parts as h_1 / h_2
         let h1 := mkIdent (Name.mkSimple s!"{h.getId}_1")
         let h2 := mkIdent (Name.mkSimple s!"{h.getId}_2")
         evalTactic (← `(tactic| rcases $(mkIdent h.getId):ident  with ⟨$h1, $h2⟩))
@@ -1740,31 +1177,21 @@ def smartTranslateOne
                   rcases $(mkIdent h.getId):ident with ⟨$(mkIdent h.getId):ident, $newName⟩))
 
                 evalTactic (← `(tactic| try rw [BVModEq.bool_to_bv] at $(mkIdent newName.getId):ident))
-                --evalTactic (← `(tactic| try simp at $(mkIdent newName.getId):ident))
 
 
-                --evalTactic (← `(tactic| translate_hypothesis $h))
-
-                -- in-place update:
                 let m ← varToHypRef.get
                 if m.contains rhsVarId then
                   return (none ,none, none, some h)
                 else
                   varToHypRef.modify fun m => m.insert rhsVarId newName
-                  -- if extraArgs.isEmpty then
-                  --   evalTactic (← `(tactic| translate_hypothesis $h))
 
-                  -- else
-                  --   evalTactic (← `(tactic| translate_hypothesis $h [$$extraArgs,*]))
                   return (none ,none, some newName, some h)
               catch _ => pure ()
           | _ => --pure ()
           try
             evalTactic (← `(tactic| apply BVModEq.extract_bv_rel at $(mkIdent h.getId):ident))
-            -- evalTactic (← `(tactic|  rw [BVModEq.map_f_to_bv] at $(mkIdent h.getId):ident))
             let h1 := mkIdent (Name.mkSimple s!"{h.getId}_1")
             let h2 := mkIdent (Name.mkSimple s!"{h.getId}_2")
-            --evalTactic (← `(tactic| simp at $(mkIdent h.getId):ident))
             evalTactic (← `(tactic| rcases $(mkIdent h.getId):ident  with ⟨$h1, $h2⟩))
             return (some h1, some h2, none, none)
           catch _ =>
@@ -1781,8 +1208,6 @@ def smartTranslateOne
               evalTactic (← `(tactic|
                   rcases $h1:ident with ⟨$h1:ident, $newName⟩))
               evalTactic (← `(tactic| apply BVModEq.extract_bv_leq at $h1:ident))
-              -- evalTactic (← `(tactic|
-              --     rcases $h1:ident with ⟨$h1:ident, $newName⟩))
               return (some newName, some h1, none, none)
             catch e =>
                 pure ()
@@ -1791,10 +1216,6 @@ def smartTranslateOne
        return (none, none, none, some h)
 
 
-def lookup (m : Std.HashMap FVarId (TSyntax `ident)) (id : FVarId) : Option (TSyntax `ident):=
-  match m.toList.find? (fun (k, _) => k == id) with
-  | some (_, v) => some v
-  | none        => none
 /-- Batch helper over a list of hypothesis idents.
     Returns the collected `*_1` names from `x*x=x` cases. -/
 def smartTranslateMany
@@ -1825,7 +1246,6 @@ def smartTranslateMany
     | none   => pure ()
 
 
--- If we got a k, push it
     match k? with
     | some k => picked := picked.push k
     | none   => pure ()
@@ -1835,7 +1255,6 @@ def smartTranslateMany
     | none   => pure ()
 
 
-    -- If we got a w, translate the hypothesis
     match w? with
     | some w =>translate := translate.push w
     | none => pure ()
@@ -1852,210 +1271,165 @@ syntax (name := translateAll) "translate_all" ppSpace
 @[tactic translateAll]
 elab_rules : tactic
 | `(tactic| translate_all $[[ $extraSimp,* ]]? $[$b:term]? ) => withMainContext do
-  let statsRef ← IO.mkRef ({ } : PhaseStats)
-  timeTacticPhase statsRef "translation" do
-  -- collect optional extra simp args (reuse your pipeline args if you like)
-    let mut sargs :
-      Array (TSyntax [`Lean.Parser.Tactic.simpStar,
-                      `Lean.Parser.Tactic.simpErase,
-                      `Lean.Parser.Tactic.simpLemma]) := #[]
-    if let some idList := extraSimp then
-      for i in idList.getElems do
-        let sa ← `(simpArg| $i:term)
-        let ua : TSyntax [`Lean.Parser.Tactic.simpStar,
-                          `Lean.Parser.Tactic.simpErase,
-                          `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
-        sargs := sargs.push ua
-    let flag ←
-      match b with
-      | some bterm =>
-          pure true
-      | none => pure false
-    evalTactic (← `(tactic| try simp [-one_mul, -mul_one]))
-    let gs ← getGoals
-    if gs.isEmpty then
-      logInfo "✅ No goals left!"
-      return
+  let mut sargs :
+    Array (TSyntax [`Lean.Parser.Tactic.simpStar,
+                    `Lean.Parser.Tactic.simpErase,
+                    `Lean.Parser.Tactic.simpLemma]) := #[]
+  if let some idList := extraSimp then
+    for i in idList.getElems do
+      let sa ← `(simpArg| $i:term)
+      let ua : TSyntax [`Lean.Parser.Tactic.simpStar,
+                        `Lean.Parser.Tactic.simpErase,
+                        `Lean.Parser.Tactic.simpLemma] := ⟨sa.raw⟩
+      sargs := sargs.push ua
+  let flag ←
+    match b with
+    | some bterm =>
+        pure true
+    | none => pure false
+  evalTactic (← `(tactic| try simp [-one_mul, -mul_one]))
+  let gs ← getGoals
+  if gs.isEmpty then
+    logInfo "No goals remain after translation."
+    return
 
-    let name := Name.mkSimple s!"h"
-    let g ← getMainGoal
-    --let collected ←
-  -- try
-    let hyps : List Name ← introAll
-    let mut ids : Array (TSyntax `ident) := #[]
-      ---et (fvarId, newGoal) ← g.intro `h
-    let g ← getMainGoal
+  let name := Name.mkSimple s!"h"
+  let g ← getMainGoal
+  let hyps : List Name ← introAll
+  let mut ids : Array (TSyntax `ident) := #[]
+  let g ← getMainGoal
 
-    for x in hyps do
-        let id : TSyntax `ident ← g.withContext do
-          let lctx ← getLCtx
-          let some decl := lctx.findFromUserName? x
-            | throwError m!"no hyp `{x}`"
-          pure (mkIdent decl.userName)
+  for x in hyps do
+      let id : TSyntax `ident ← g.withContext do
+        let lctx ← getLCtx
+        let some decl := lctx.findFromUserName? x
+          | throwError m!"no hyp `{x}`"
+        pure (mkIdent decl.userName)
 
-        ids := ids.push id
+      ids := ids.push id
 
-    if ids.size == 1 then
+  if ids.size == 1 then
+    try
+      ids <- flattenAnds ids[0]!
+    catch _ => pure ()
+
+  let varToHypRef ← IO.mkRef ({} : Std.HashMap FVarId (TSyntax `ident))
+  let ( collected, changed) := (← smartTranslateMany ids sargs varToHypRef flag)
+
+  let mut after ← getGoals
+  if after.isEmpty then
+    return
+  let flagStx ←
+  if flag then
+    `(true)
+  else
+    `(false)
+  evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx ))
+
+
+  evalTactic (← `(tactic| try simp ))
+  let flag ←
+    match b with
+    | some bterm =>
+        pure true
+    | none => pure false
+  after ← getGoals
+  if after.isEmpty then
+    return
+  let tgt ← (← getMainGoal).getType
+  let tgt <- whnf tgt
+  let (fn, args) := tgt.getAppFnArgs
+  let mut bitblast :=
+    match fn with
+    | ``Eq  => true
+    | ``Or => true
+    | ``And => true
+    | ``Iff => true
+    | _ => false
+
+  if bitblast then
       try
-        ids <- flattenAnds ids[0]!
-      catch _ => pure ()
+        evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+      catch _ =>
 
-    let varToHypRef ← IO.mkRef ({} : Std.HashMap FVarId (TSyntax `ident))
-    let ( collected, changed) := (← smartTranslateMany ids sargs varToHypRef flag)
-
-    --colected := collected ++ changed
-    let mut after ← getGoals
-    if after.isEmpty then
-      return
-    let flagStx ←
-    if flag then
-      `(true)
-    else
-      `(false)
-    evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx ))
-
-
-    evalTactic (← `(tactic| try simp ))
-    let flag ←
-      match b with
-      | some bterm =>
-          pure true
-      | none => pure false
-    after ← getGoals
-    if after.isEmpty then
-      return
-    let tgt ← (← getMainGoal).getType
-    let tgt <- whnf tgt
-    let (fn, args) := tgt.getAppFnArgs
-    let mut bitblast :=
-      match fn with
-      | ``Eq  => true
-      | ``Or => true
-      | ``And => true
-      | ``Iff => true
-      | _ => false
-
-    if bitblast then
+        let all := collected ++ changed
+        evalTactic (← `(tactic| autoCastBits [$[$all],*]))
+        let mut rw := true
+        while (rw) do
+          try
+              evalTactic (← `(tactic| intro h))
+              evalTactic (← `(tactic| try rw [h]))
+              for hyp in ids ++ changed  do
+                evalTactic (← `(tactic| try rw [h] at $(mkIdent hyp.getId):ident))
+              evalTactic (← `(tactic| clear h))
+          catch _ =>
+            rw := false
         try
-          timeTacticPhase statsRef "bitblast" do
+          evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+        catch _ =>
+          pure ()
+
+          try
+            let mut index :=0
+            let fv1T : TSyntax `term := (← termFor `fv1)
+            let fv2T : TSyntax `term := (← termFor `fv2)
+            while index < collected.size/2 do
+
+              let idName  := Name.mkSimple s!"b0_{index}"
+
+              let idSyn   : TSyntax `ident := mkIdent idName
+              let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+
+              evalTactic (← `(tactic|
+                set $idSyn := $fv1T[$idxSyn]
+              ))
+              index := index + 1
+            index := 0
+            while index < collected.size/2 do
+              let idName  := Name.mkSimple s!"b1_{index}"
+
+              let idSyn   : TSyntax `ident := mkIdent idName
+              let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
+
+              evalTactic (← `(tactic|
+                set $idSyn := $fv2T[$idxSyn]
+              ))
+              index := index + 1
             evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
         catch _ =>
-
-          let all := collected ++ changed
-          evalTactic (← `(tactic| autoCastBits [$[$all],*]))
-          let mut rw := true
-          while (rw) do
-            try
-                evalTactic (← `(tactic| intro h))
-                evalTactic (← `(tactic| try rw [h]))
-                for hyp in ids ++ changed  do
-                  evalTactic (← `(tactic| try rw [h] at $(mkIdent hyp.getId):ident))
-                evalTactic (← `(tactic| clear h))
-                -- evalTactic (← `(tactic| try simp only [BitVec.setWidth] at $(mkIdent hyp.getId):ident))
-            catch _ =>
-              rw := false
-          try
-            timeTacticPhase statsRef "bitblast" do
-              evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-        -- else
-        --   logInfo m!"NO BV DECIDE {fn}"
-          catch _ =>
-            pure ()
-
-            try
-            --THIS IS NEEDED FOR JOLT BUT NOT CIRC WE SHOULD FIND A WAY TO ABSTRACT THIS
-              let mut index :=0
-              let fv1T : TSyntax `term := (← termFor `fv1)
-              let fv2T : TSyntax `term := (← termFor `fv2)
-              while index < collected.size/2 do
-
-                -- names for the bound and its equality
-                let idName  := Name.mkSimple s!"b0_{index}"
-
-                -- identifiers/syntax nodes
-                let idSyn   : TSyntax `ident := mkIdent idName
-                let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
-
-                -- safest access: .get! (parses reliably inside quotations)
-                evalTactic (← `(tactic|
-                  set $idSyn := $fv1T[$idxSyn]
-                ))
-                index := index + 1
-              index := 0
-              while index < collected.size/2 do
-                -- names for the bound and its equality
-                let idName  := Name.mkSimple s!"b1_{index}"
-
-                -- identifiers/syntax nodes
-                let idSyn   : TSyntax `ident := mkIdent idName
-                let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
-
-                -- safest access: .get! (parses reliably inside quotations)
-                evalTactic (← `(tactic|
-                  set $idSyn := $fv2T[$idxSyn]
-                ))
-                index := index + 1
-              timeTacticPhase statsRef "bitblast" do
-                evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-          catch _ =>
-            -- pure ()
-              evalTactic (← `(tactic| split_ands))
+            evalTactic (← `(tactic| split_ands))
 
 
-      --logInfo m! "Collected {collected}"
-    withMainContext do
-      timeTacticPhase statsRef "range" do
+  withMainContext do
+    evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
+  after ← getGoals
+
+  if !after.isEmpty then
+    while (!after.isEmpty) do
+      let before ← getGoals
+
+      withMainContext do
+        evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx))
+      let tgt ← (← getMainGoal).getType
+      let tgt <- whnf tgt
+      let (fn, args) := tgt.getAppFnArgs
+      bitblast :=
+          match fn with
+          | ``Eq  => true
+          | ``Or => true
+          | ``And => true
+          | ``Iff => true
+          | _ => false
+      if bitblast then
+          let g <- getMainGoal
+          withMainContext do
+            evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
+
+      withMainContext do
         evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
-    after ← getGoals
 
-    if !after.isEmpty then
-      while (!after.isEmpty) do
-    -- record the current state
-        let before ← getGoals
+      after ← getGoals
+      if before == after then
+        return
 
-    -- -- run your tactics
-        withMainContext do
-          evalTactic (← `(tactic| translate_goal [$[$collected],*] $flagStx))
-        let tgt ← (← getMainGoal).getType
-        let tgt <- whnf tgt
-        let (fn, args) := tgt.getAppFnArgs
-        bitblast :=
-            match fn with
-            | ``Eq  => true
-            | ``Or => true
-            | ``And => true
-            | ``Iff => true
-            | _ => false
-        if bitblast then
-            let g <- getMainGoal
-            --logInfo m!"{g}"
-            withMainContext do
-              timeTacticPhase statsRef "bitblast" do
-                evalTactic (← `(tactic| bv_decide (config := {timeout := 300})))
-
-    --     -- read the new state
-        withMainContext do
-          timeTacticPhase statsRef "range" do
-            evalTactic (← `(tactic| try_apply_lemma_hyps [$[$collected],*]))
-
-        after ← getGoals
-        -- if no change → stop
-        if before == after then
-          return
-  printPhaseStats statsRef
-
--- set_option maxRecDepth 1048576
--- set_option maxHeartbeats  20000000000000000000
--- set_option exponentiation.threshold 900
--- abbrev ffff0 := 52435875175126190479447740508185965837690552500527637822603658699938581184513
--- instance : Fact (Nat.Prime ffff0) := by sorry
--- instance : Fact (NeZero ffff0) := by sorry
--- instance NotTwo: BVModEq.GtTwo (ffff0) := by sorry
-
--- abbrev FF0 := ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513
--- variable (fresh_pf1_sum_bit1 : FF0)
--- variable (a : BitVec 2)
--- variable (fresh_pf0_sum_bit0 : FF0)
--- lemma correct :
--- ((((((((fresh_pf0_sum_bit0) * (fresh_pf0_sum_bit0))) = (fresh_pf0_sum_bit0))) ∧ (((((fresh_pf1_sum_bit1) * (fresh_pf1_sum_bit1))) = (fresh_pf1_sum_bit1))) ∧ (((((fresh_pf0_sum_bit0) + (((fresh_pf1_sum_bit1) * (2 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513))))) = (BVModEq.map_bv_to_f 52435875175126190479447740508185965837690552500527637822603658699938581184513  a)))) → (((((if (((BVModEq.bool_to_bv 1 a[0]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf0_sum_bit0))) ∧ (((if (((BVModEq.bool_to_bv 1 a[1]!) = (BitVec.ofNat 1 1))) then (1 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513) else (0 : ZMod 52435875175126190479447740508185965837690552500527637822603658699938581184513)) = (fresh_pf1_sum_bit1)))))))
---  := by translate_all
+end BVModEq

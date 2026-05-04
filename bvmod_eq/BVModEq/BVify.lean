@@ -1,30 +1,18 @@
 /-
-Copyright (c) 2022 Moritz Doll. All rights reserved.
-Released under Apache 2.0 license as described in the file LICENSE.
-Authors: Moritz Doll, Mario Carneiro, Robert Y. Lewis
+This file is adapted from `Mathlib.Tactic.Zify`.
+
+It implements a `bvify` tactic, which mirrors the structure of `zify`,
+but specializes it for BitVec goals. Instead of rewriting into integers,
+it rewrites expressions into `BitVec.ofNat` form and simplifies using
+bitvector-specific lemmas.
 -/
-import Lean.Elab.Term
-import Lean.LabelAttribute
-import Lean.Meta.Basic
-import Lean.Meta.Tactic.Simp.RegisterCommand
+
 import Lean.Meta.Tactic.Simp.SimpTheorems
-import Mathlib.Algebra.Field.Defs
-import Mathlib.Algebra.Field.ZMod
-import Mathlib.Algebra.Order.Kleene
-import Mathlib.Control.Fold
+import Lean.Meta.Tactic.Simp.RegisterCommand
+
 import Mathlib.Data.Int.Cast.Basic
-import Mathlib.Data.Nat.Prime.Defs
 import Mathlib.Data.ZMod.Basic
-import Mathlib.Data.ZMod.Defs
-import Mathlib.Order.Basic
-import Mathlib.Tactic.Attr.Register
 import Mathlib.Tactic.Basic
-import Mathlib.Tactic.Bound
-import Mathlib.Tactic.Linarith
-import Mathlib.Tactic.Positivity
-import Mathlib.Tactic.Ring
-import Mathlib.Tactic.Ring
-import Std.Data.HashMap.Basic
 import Std.Tactic.BVDecide
 
 import BVModEq.Lemmas
@@ -37,188 +25,123 @@ open Lean.Elab.Tactic
 open Lean.Meta
 open Lean.Parser.Tactic
 
+/-- Multiplication distributes through `BitVec.ofNat`. -/
 lemma BitVec.ofNat_mul {w a b : ℕ} :
-  BitVec.ofNat w (a * b) = (BitVec.ofNat w a) * (BitVec.ofNat w b)
-  := by
-    rw [BitVec.ofNat, BitVec.ofNat, BitVec.ofNat]
-    rw [Fin.ofNat, Fin.ofNat,  Fin.ofNat]
-    apply congrArg
-    simp_all
-    apply Fin.eq_of_val_eq
-    simp_all
+    BitVec.ofNat w (a * b) = BitVec.ofNat w a * BitVec.ofNat w b := by
+  rw [BitVec.ofNat, BitVec.ofNat, BitVec.ofNat]
+  rw [Fin.ofNat, Fin.ofNat, Fin.ofNat]
+  apply congrArg
+  simp_all
+  apply Fin.eq_of_val_eq
+  simp_all
 
-lemma ult_bv {x y : ℕ} (hx : x ≤ 1) (hy : y ≤ 1) :
-  (BitVec.ofNat bw (1 - x + x * y - y))
-  = (BitVec.ofNat bw 1 - BitVec.ofNat bw x + BitVec.ofNat bw x * BitVec.ofNat bw y - BitVec.ofNat bw y)
-  := by
-    apply split_one at hx
-    apply split_one at hy
-    apply Or.elim hx
-    intro hx'
-    apply Or.elim hy
-    intro hy'
-    rw [hx']
-    rw [hy']
-    simp
-    intro hy'
-    rw [hx']
-    rw [hy']
-    simp
-    intro hx'
-    apply Or.elim hy
-    intro hy'
-    rw [hx']
-    rw [hy']
-    simp
-    intro hy'
-    rw [hx']
-    rw [hy']
-    simp
+/-- `if` over Bool commutes with `BitVec.ofNat`. -/
+lemma BitVec.ofNat_if_then_else {bw x y : ℕ} {b : Bool} :
+    BitVec.ofNat bw (if b then x else y)
+      =
+    if b then BitVec.ofNat bw x else BitVec.ofNat bw y := by
+  split_ifs <;> simp
 
+/-- `if` over Prop commutes with `BitVec.ofNat`. -/
+lemma BitVec.ofNat_if_then_prop_else {bw x y : ℕ} {b : Prop} [Decidable b] :
+    BitVec.ofNat bw (if b then x else y)
+      =
+    if b then BitVec.ofNat bw x else BitVec.ofNat bw y := by
+  split_ifs <;> simp
 
-lemma BitVec.ofNat_if_then_else {bw x y: ℕ}  {b: Bool} :
-  BitVec.ofNat bw (if b then x else y) = if b then BitVec.ofNat bw x else BitVec.ofNat bw y := by
-  split_ifs
-  simp
-  simp
+/-- Subtraction distributes through `BitVec.ofNat` under bounds. -/
+lemma BitVec.ofNat_sub {bw x y : ℕ} (h : y ≥ x) (h1 : y < 2 ^ bw) :
+    BitVec.ofNat bw (y - x) = BitVec.ofNat bw y - BitVec.ofNat bw x := by
+  unfold BitVec.ofNat
+  rw [Fin.ofNat, Fin.ofNat, Fin.ofNat]
+  apply congrArg
+  simp_all
+  apply Fin.eq_of_val_eq
+  simp_all
+  rw [← Nat.mod_sub_of_le]
 
-lemma BitVec.ofNat_if_then_prop_else {bw x y: ℕ}  {b: Prop} [Decidable b] :
-  BitVec.ofNat bw (if b then x else y) = if b then BitVec.ofNat bw x else BitVec.ofNat bw y := by
-  split_ifs
-  simp
-  simp
-
-
-lemma sub_add_right_recursive {α : Type*} [AddCommGroup α]
-    (a b c : α) : a - b + c = (a + c) - b := by
-  rw [sub_eq_add_neg, add_assoc]
-  rw [sub_eq_add_neg]
-  rw [add_comm (-b) (c)]
-  rw [add_assoc]
-
-lemma BitVec.ofNat_sub  {bw x y : ℕ}  (h : y ≥ x) (h1: y < 2 ^ bw)   :
-  BitVec.ofNat bw (y - x) = (BitVec.ofNat bw y) - (BitVec.ofNat bw x)
-  := by
-    unfold BitVec.ofNat
-    rw [Fin.ofNat, Fin.ofNat,  Fin.ofNat]
-    apply congrArg
-    simp_all
-    apply Fin.eq_of_val_eq
-    simp_all
-    --nth_rewrite 3 [Nat.mod_eq_of_lt]
-    rw [<- Nat.mod_sub_of_le]
-
-    --rw [Nat.mod_sub_of_le]
-    rw [← Nat.add_mod_right]
-    have pow_pos := Nat.two_pow_pos bw
-    have hx : x % 2 ^ bw ≤ (y + 2 ^ bw) % 2 ^ bw := by
-          rw [Nat.add_mod_right ]
-          rw [Nat.mod_eq_of_lt]
-          rw [Nat.mod_eq_of_lt]
-          apply h
-          apply h1
-          apply lt_of_le_of_lt h h1
-    conv =>
-      enter [2]
-      simp
-      rw [Nat.add_comm (2 ^ bw - x % 2^ bw) y]
-      rw [← Nat.add_sub_assoc (Nat.le_of_lt (Nat.mod_lt x pow_pos))]
-      rw [<- Nat.mod_sub_of_le hx]
-      rw [Nat.add_mod_right ]
-    simp
-    nth_rewrite 3 [Nat.mod_eq_of_lt]
-    simp
-    apply lt_of_le_of_lt h h1
+  have pow_pos := Nat.two_pow_pos bw
+  have hx : x % 2 ^ bw ≤ (y + 2 ^ bw) % 2 ^ bw := by
+    rw [Nat.add_mod_right]
+    rw [Nat.mod_eq_of_lt]
     rw [Nat.mod_eq_of_lt]
     apply h
     apply h1
+    exact lt_of_le_of_lt h h1
 
-
-
-
-
-
-
-
-
-
-lemma or_bv {x y : ℕ} {bw : ℕ}  (hx : x ≤ 1) (hy : y ≤ 1) :
-  BitVec.ofNat bw ((x + y) - x*y) = BitVec.ofNat bw (x) + BitVec.ofNat bw (y) - BitVec.ofNat bw (x) *BitVec.ofNat bw (y)
-  := by
-    apply split_one at hx
-    apply split_one at hy
-    apply Or.elim hx
-    intro hx'
-    apply Or.elim hy
-    intro hy'
-    rw [hx']
-    rw [hy']
+  conv =>
+    enter [2]
     simp
-    intro hy'
-    rw [hx']
-    rw [hy']
-    simp
-    intro hx'
-    apply Or.elim hy
-    intro hy'
-    rw [hx']
-    rw [hy']
-    simp
-    intro hy'
-    rw [hx']
-    rw [hy']
-    simp
-    rw [BitVec.add_sub_cancel]
+    rw [Nat.add_comm (2 ^ bw - x % 2 ^ bw) y]
+    rw [← Nat.add_sub_assoc (Nat.le_of_lt (Nat.mod_lt x pow_pos))]
+    rw [← Nat.mod_sub_of_le hx]
+    rw [Nat.add_mod_right]
 
+  nth_rewrite 3 [Nat.mod_eq_of_lt]
+  simp
+  exact lt_of_le_of_lt h h1
+  rw [Nat.mod_eq_of_lt]
+  apply h
+  apply h1
 
-
+/-- Main `bvify` tactic: simplifies goals into BitVec-normalized form. -/
 syntax (name := bvify) "bvify" (simpArgs)? (location)? : tactic
 
 macro_rules
-| `(tactic| bvify $[[$simpArgs,*]]? $[at $location]?) =>
-  let args := simpArgs.map (·.getElems) |>.getD #[]
-  `(tactic|
-    simp   [ BitVec.ofNat_if_then_else, BitVec.ofNat_if_then_prop_else , BitVec.ofNat_sub, BitVec.ofNat_add, BitVec.ofNat_mul, BitVec.ofNat_toNat, push_cast,  $[$args],*] $[at $location]? )
+  | `(tactic| bvify $[[$simpArgs,*]]? $[at $location]?) =>
+    let args := simpArgs.map (·.getElems) |>.getD #[]
+    `(tactic|
+      simp [
+        BitVec.ofNat_if_then_else,
+        BitVec.ofNat_if_then_prop_else,
+        BitVec.ofNat_sub,
+        BitVec.ofNat_add,
+        BitVec.ofNat_mul,
+        BitVec.ofNat_toNat,
+        push_cast,
+        $[$args],*
+      ] $[at $location]?
+    )
 
--- /-- The `Simp.Context` generated by `zify`. -/
-def mkZifyContext (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ",")) :
+/-- Build the simp context used by `bvify` (mirrors `zify`). -/
+def mkBVifyContext
+    (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ",")) :
     TacticM MkSimpContextResult := do
   let args := simpArgs.map (·.getElems) |>.getD #[]
   mkSimpContext
-    (← `(tactic| simp [  BitVec.ofNat_if_then_else, BitVec.ofNat_if_then_prop_else , BitVec.ofNat_sub, BitVec.ofNat_add, BitVec.ofNat_mul,  BitVec.ofNat_toNat, push_cast,  $[$args],*] )) false
+    (← `(tactic|
+      simp [
+        BitVec.ofNat_if_then_else,
+        BitVec.ofNat_if_then_prop_else,
+        BitVec.ofNat_sub,
+        BitVec.ofNat_add,
+        BitVec.ofNat_mul,
+        BitVec.ofNat_toNat,
+        push_cast,
+        $[$args],*
+      ]
+    ))
+    false
 
-/-- A variant of `applySimpResultToProp` that cannot close the goal, but does not need a meta
-variable and returns a tuple of a proof and the corresponding simplified proposition. -/
-def applySimpResultToProp' (proof : Expr) (prop : Expr) (r : Simp.Result) : MetaM (Expr × Expr) :=
-  do
+/-- Apply simp result to a proposition without closing the goal. -/
+def applySimpResultToProp' (proof prop : Expr) (r : Simp.Result) :
+    MetaM (Expr × Expr) := do
   match r.proof? with
-  | some eqProof => return (← mkExpectedTypeHint (← mkEqMP eqProof proof) r.expr, r.expr)
+  | some eqProof =>
+      return (← mkExpectedTypeHint (← mkEqMP eqProof proof) r.expr, r.expr)
   | none =>
-    if r.expr != prop then
-      return (← mkExpectedTypeHint proof r.expr, r.expr)
-    else
-      return (proof, r.expr)
+      if r.expr != prop then
+        return (← mkExpectedTypeHint proof r.expr, r.expr)
+      else
+        return (proof, r.expr)
 
-/-- Translate a proof and the proposition into a zified form. -/
-def zifyProof (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ","))
-    (proof : Expr) (prop : Expr) : TacticM (Expr × Expr) := do
-  let ctx_result ← mkZifyContext simpArgs
-  let (r, _) ← simp prop ctx_result.ctx
+/-- Core transformation step, analogous to `zifyProof`. -/
+def bvifyProof
+    (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ","))
+    (proof prop : Expr) :
+    TacticM (Expr × Expr) := do
+  let ctxResult ← mkBVifyContext simpArgs
+  let (r, _) ← simp prop ctxResult.ctx
   applySimpResultToProp' proof prop r
 
-end BVify
-
-end Mathlib.Tactic
-
-
--- abbrev ff := 52435875175126190479447740508185965837690552500527637822603658699938581184513
-
-
-  -- example {b a h' : BitVec 2} : (BitVec.ofNat 3 ((b.toNat: ZMod ff).val + 3 - ((a.toNat:ZMod ff).val)))[2] = a.ult b := by
-  -- simp
-  -- nth_rewrite 2 [Nat.mod_eq_of_lt]
-  -- nth_rewrite 1 [Nat.mod_eq_of_lt]
-  -- rw [Mathlib.Tactic.BVify.BitVec.ofNat_sub]
-  -- bvify
-  -- bv_decide
-  -- try_apply_lemma_hyps []
+end Mathlib.Tactic.BVify

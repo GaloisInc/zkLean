@@ -2,185 +2,110 @@
 Copyright (c) 2022 Moritz Doll. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Moritz Doll, Mario Carneiro, Robert Y. Lewis
+
+This file is adapted from `Mathlib.Tactic.Zify`.
+
+It implements a `valify` tactic, which mirrors the structure of `zify`,
+but specializes it for `ZMod.val` goals. Instead of rewriting into integers,
+it rewrites expressions involving `ZMod n` into their `.val` form and
+simplifies using `ZMod.val` lemmas.
 -/
 
+import Lean.Meta.Tactic.Simp.RegisterCommand
+import Lean.Meta.Tactic.Simp.SimpTheorems
+
+import Mathlib.Algebra.Field.ZMod
+import Mathlib.Data.ZMod.Basic
+import Mathlib.Tactic.Basic
+
 import BVModEq.Lemmas
-import BVModEq.Mappings
 
 open Lean Meta Elab Tactic
 open Lean.Parser.Tactic
 
 namespace BVModEq
 
-lemma one_le_two_mod_of_three_le {n : ℕ} (hn : 3 ≤ n) : 1 ≤ 2 % n := by
-  have hlt : 2 < n := Nat.succ_le.mp hn
-  simp [Nat.mod_eq_of_lt hlt]
+/-- `if` over Bool commutes with `ZMod.val`. -/
+lemma ZMod.if_then_else_val {x y : ZMod n} {b : Bool} :
+    (if b then x else y).val = if b then x.val else y.val := by
+  split_ifs <;> simp
 
---(1 - fv1[0] - fv2[0] + fv1[0] * fv2[0] + fv1[0] * fv2[0])
+/-- `if` over Prop commutes with `ZMod.val`. -/
+lemma ZMod.if_then_else_prop_val {x y : ZMod n} {b : Prop} [Decidable b] :
+    (if b then x else y).val = if b then x.val else y.val := by
+  split_ifs <;> simp
 
-
-
-lemma ult_val [NZ : NeZero n] [h: GtTwo n] {x y : ZMod n}
-  (hx : x.val ≤ 1) (hy : y.val ≤ 1) :
-  (1 - x - y + x * y + x * y).val
-    = 1 - x.val + x.val * y.val - y.val + x.val * y.val
-  := by
-
-    have hz : x*y + (x*y + (1 - x - y)) = (x*y + x*y + (1 - x)) - y := by
-      simp [sub_eq_add_neg, add_assoc, add_left_comm, add_comm]
-    have k := congrArg ZMod.val hz
-    conv =>
-      lhs
-      simp [add_comm]
-      rw [k]
-
-    haveI F : Fact (1 < n) := ⟨(by decide : 1 < 2).trans h.out⟩
-    rw [ZMod.val_sub]
-    simp [ZMod.val_add]
-    simp [ZMod.val_mul]
-    rw [ZMod.val_sub]
-    rw [ZMod.val_one]
-    simp [add_assoc]
-    simp [add_left_comm, add_comm]
-
-    cases split_one hx
-    · case inl XL =>
-      simp [XL]
-      rw [Nat.mod_eq_of_lt]
-      apply F.out
-    · case inr XR =>
-      simp [XR]
-      cases split_one hy
-      · case inl YL =>
-        simp [YL]
-      · case inr YR =>
-        simp [YR]
-        rw [Nat.mod_eq_of_lt]
-        apply h.out
-
-    rw [ZMod.val_one]
-    · apply hx
-    · simp [ZMod.val_add, ZMod.val_mul]
-      rw [ZMod.val_sub]
-      · rw [ZMod.val_one]
-        cases split_one hy
-        · case inl YL => simp [YL]
-        · case inr YR =>
-          simp [YR]
-          cases split_one hx
-          · case inl XL =>
-            simp [XL]
-            rw [Nat.mod_eq_of_lt]
-            have := GtTwo.gt_two (G := h)
-            omega
-          · case inr XR =>
-            simp [XR]
-            rw [Nat.mod_eq_of_lt]
-            omega
-            apply h.out
-      · rw [ZMod.val_one]
-        apply hx
-
-lemma one_val n [NZ : NeZero n] [G : GtTwo n] {x y : ZMod n} (hx : x.val ≤ 1) :
-  (1 - x).val = (1 - x.val) % n := by
-  have NZ' := @NeZero.ne _ _ _ NZ
-  have G' := GtTwo.gt_two (G := G)
-  have h': Fact (1 < n) := ⟨lt_trans Nat.one_lt_two G'⟩
-  rw [ZMod.val_sub]
-  simp [ZMod.val_one]
-  cases split_one hx
-  · case inl A =>
-    rw [A] at hx ⊢
-    · simp
-      rw [Nat.mod_eq_of_lt]
-      ·
-        cases n
-        · contradiction
-        · simp ; omega
-  · case inr B =>
-    simp [B]
-  simp [ZMod.val_one]
-  apply hx
-
-
-lemma ZMod.plus_ge_mult [h: NeZero n] [h': GtTwo n] {x y : ZMod n}
-  (hx : x.val ≤ 1) (hy : y.val ≤ 1) :
-  (x * y).val ≤ (x + y).val := by
-  simp [ZMod.val_mul]
-  simp [ZMod.val_add]
-  match (⟨ split_one hx, split_one hy ⟩ : _ ∧ _) with
-  | ⟨ .inl A, .inl B ⟩ => simp [A, B]
-  | ⟨ .inl A, .inr B ⟩ => simp [A, B]
-  | ⟨ .inr A, .inl B ⟩ => simp [A, B]
-  | ⟨ .inr A, .inr B ⟩ =>
-    simp [A, B]
-    have H : 2 < n := h'.out
-    rw [Nat.mod_eq_of_lt] <;> try omega
-    rw [Nat.mod_eq_of_lt] <;> omega
-
-
-lemma ZMod.if_then_else_val {x y : ZMod n} {b: Bool} :
-  (if b then x else y).val = if b then x.val else y.val := by
-  split_ifs
-  simp
-  simp
-
-lemma ZMod.if_then_else_prop_val {x y : ZMod n} {b: Prop} [Decidable b] :
-  (if b then x else y).val = if b then x.val else y.val := by
-  split_ifs
-  simp
-  simp
-
-
-lemma or_val [h: NeZero n] [h': GtTwo n] {x y : ZMod n}
-  (hx : x.val ≤ 1) (hy : y.val ≤ 1) :
-  (x + y - x*y).val = ((x.val + y.val) - (x.val * y.val)) % n := by
-  simp [ZMod.val_sub (ZMod.plus_ge_mult hx hy)]
-  simp [ZMod.val_mul]
-  simp [ZMod.val_add]
-  match (⟨ split_one hx, split_one hy ⟩ : _ ∧ _) with
-  | ⟨ .inl A, .inl B ⟩ => simp [A, B]
-  | ⟨ .inl A, .inr B ⟩ => simp [A, B]
-  | ⟨ .inr A, .inl B ⟩ => simp [A, B]
-  | ⟨ .inr A, .inr B ⟩ =>
-    simp [A, B]
-    rcases n with _ | _ | _ | _
-    · simp
-    · simp
-    · simp
-      exact (lt_irrefl 2) h'.out
-    · simp [Nat.mod_eq_of_lt]
-
+/-- Main `valify` tactic: simplifies goals into `.val`-normalized form. -/
 syntax (name := valify) "valify" (simpArgs)? (location)? : tactic
 
 macro_rules
-| `(tactic| valify $[[$simpArgs,*]]? $[at $location]?) =>
-  let args := simpArgs.map (·.getElems) |>.getD #[]
-  `(tactic|
-    simp [ -zero_sub, -ZMod.val_eq_zero, ZMod.if_then_else_val, ZMod.if_then_else_prop_val, ZMod.val_sub, ZMod.val_add, ZMod.val_mul, ZMod.val_one, ZMod.val_zero, ZMod.val_ofNat, push_cast, $[$args],*] $[at $location]? )
+  | `(tactic| valify $[[$simpArgs,*]]? $[at $location]?) =>
+    let args := simpArgs.map (·.getElems) |>.getD #[]
+    `(tactic|
+      simp [
+        -zero_sub,
+        -ZMod.val_eq_zero,
+        ZMod.if_then_else_val,
+        ZMod.if_then_else_prop_val,
+        ZMod.val_sub,
+        ZMod.val_add,
+        ZMod.val_mul,
+        ZMod.val_one,
+        ZMod.val_zero,
+        ZMod.val_ofNat,
+        push_cast,
+        $[$args],*
+      ] $[at $location]?
+    )
 
--- /-- The `Simp.Context` generated by `zify`. -/
-def mkZifyContext (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ",")) :
+/-- Build the simp context used by `valify` (mirrors `zify`). -/
+def mkValifyContext
+    (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ",")) :
     TacticM MkSimpContextResult := do
   let args := simpArgs.map (·.getElems) |>.getD #[]
   mkSimpContext
-    (← `(tactic| simp  [-zero_sub, -ZMod.val_eq_zero, ZMod.if_then_else_val,ZMod.if_then_else_prop_val, ZMod.val_sub, ZMod.val_add, ZMod.val_mul, ZMod.val_one, ZMod.val_zero,  ZMod.val_ofNat, push_cast, $[$args],*] )) false
+    (← `(tactic|
+      simp [
+        -zero_sub,
+        -ZMod.val_eq_zero,
+        ZMod.if_then_else_val,
+        ZMod.if_then_else_prop_val,
+        ZMod.val_sub,
+        ZMod.val_add,
+        ZMod.val_mul,
+        ZMod.val_one,
+        ZMod.val_zero,
+        ZMod.val_ofNat,
+        push_cast,
+        $[$args],*
+      ]
+    ))
+    false
 
-/-- A variant of `applySimpResultToProp` that cannot close the goal, but does not need a meta
-variable and returns a tuple of a proof and the corresponding simplified proposition. -/
-def applySimpResultToProp' (proof : Expr) (prop : Expr) (r : Simp.Result) : MetaM (Expr × Expr) :=
-  do
+/--
+Apply a simp result to a proposition without closing the goal.
+
+This mirrors the helper used by `zify`, but is reused here for the
+`.val`-normalization pass.
+-/
+def applySimpResultToProp' (proof prop : Expr) (r : Simp.Result) :
+    MetaM (Expr × Expr) := do
   match r.proof? with
-  | some eqProof => return (← mkExpectedTypeHint (← mkEqMP eqProof proof) r.expr, r.expr)
+  | some eqProof =>
+      return (← mkExpectedTypeHint (← mkEqMP eqProof proof) r.expr, r.expr)
   | none =>
-    if r.expr != prop then
-      return (← mkExpectedTypeHint proof r.expr, r.expr)
-    else
-      return (proof, r.expr)
+      if r.expr != prop then
+        return (← mkExpectedTypeHint proof r.expr, r.expr)
+      else
+        return (proof, r.expr)
 
-/-- Translate a proof and the proposition into a zified form. -/
-def zifyProof (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ","))
-    (proof : Expr) (prop : Expr) : TacticM (Expr × Expr) := do
-  let ctx_result ← mkZifyContext simpArgs
-  let (r, _) ← simp prop ctx_result.ctx
+/-- Core transformation step: convert a proposition into `valify`-normalized form. -/
+def valifyProof
+    (simpArgs : Option (Syntax.TSepArray `Lean.Parser.Tactic.simpStar ","))
+    (proof prop : Expr) :
+    TacticM (Expr × Expr) := do
+  let ctxResult ← mkValifyContext simpArgs
+  let (r, _) ← simp prop ctxResult.ctx
   applySimpResultToProp' proof prop r
+
+end BVModEq
