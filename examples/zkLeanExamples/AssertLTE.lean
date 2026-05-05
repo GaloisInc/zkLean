@@ -84,4 +84,4 @@ lemma assert_lte_32_mle_one_chunk_ (bv1 bv2 : BitVec 32) (fv1 fv2 : Vector (ZMod
  simp (config := { failIfUnchanged := false })
  unfold Vector.append
  simp (config := { failIfUnchanged := false })
- solveMLE 32
+ translate_all false

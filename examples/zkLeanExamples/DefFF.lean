@@ -1,6 +1,6 @@
 import Mathlib.Algebra.Field.ZMod
 import zkLean.Formalism
-import BVModEq.SolveMLE
+import BVModEq.TranslateAll
 
 abbrev ff := 17179869263
 
