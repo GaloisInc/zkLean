@@ -8,12 +8,12 @@ name = "zkLean"
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
-rev = "v4.25.2"
+rev = "v4.28.0-rc1"
 
 [[require]]
 name = "cslib"
 scope = "leanprover"
-rev = "v4.25.1" # Note: they did not make a 4.25.2 release yet
+rev = "v4.28.0-rc1"
 
 [[require]]
 name = "BVModEq"

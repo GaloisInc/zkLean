@@ -174,7 +174,7 @@ elab_rules : tactic
     let idName  := Name.mkSimple s!"b0_{index}"
 
     -- identifiers/syntax nodes
-    let idSyn   : TSyntax `ident := mkIdent idName
+    let idSyn   : TSyntax `Lean.binderIdent := ⟨(mkIdent idName).raw⟩
     let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
 
     -- safest access: .get! (parses reliably inside quotations)
@@ -188,7 +188,7 @@ elab_rules : tactic
     let idName  := Name.mkSimple s!"b1_{index}"
 
     -- identifiers/syntax nodes
-    let idSyn   : TSyntax `ident := mkIdent idName
+    let idSyn   : TSyntax `Lean.binderIdent := ⟨(mkIdent idName).raw⟩
     let idxSyn  : TSyntax `term  := Syntax.mkNumLit (toString index)
 
     -- safest access: .get! (parses reliably inside quotations)
